@@ -19,7 +19,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Range;
 import io.trino.plugin.hive.HiveConfig;
 import io.trino.plugin.hive.HiveTimestampPrecision;
-import io.trino.plugin.hive.benchmark.StandardFileFormats;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
 import io.trino.spi.connector.ConnectorPageSource;
@@ -43,8 +42,6 @@ import java.util.Optional;
 import static com.google.common.collect.Iterables.cycle;
 import static com.google.common.collect.Iterables.limit;
 import static com.google.common.collect.Iterables.transform;
-import static io.trino.hadoop.ConfigurationInstantiator.newEmptyConfiguration;
-import static io.trino.plugin.hive.HiveTestUtils.HDFS_ENVIRONMENT;
 import static io.trino.plugin.hive.HiveTestUtils.getHiveSession;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.TimestampType.createTimestampType;
@@ -114,7 +111,7 @@ public class TestTimestamp
         List<String> columnNames = ImmutableList.of("test");
 
         try (ParquetTester.TempFile tempFile = new ParquetTester.TempFile("test", "parquet")) {
-            JobConf jobConf = new JobConf(newEmptyConfiguration());
+            JobConf jobConf = new JobConf(false);
             jobConf.setEnum(WRITER_VERSION, PARQUET_1_0);
 
             ParquetTester.writeParquetColumn(
@@ -138,7 +135,7 @@ public class TestTimestamp
              throws IOException
     {
         Iterator<?> expected = expectedValues.iterator();
-        try (ConnectorPageSource pageSource = StandardFileFormats.TRINO_PARQUET.createFileFormatReader(session, HDFS_ENVIRONMENT, tempFile.getFile(), columnNames, ImmutableList.of(type))) {
+        try (ConnectorPageSource pageSource = ParquetUtil.createPageSource(session, tempFile.getFile(), columnNames, ImmutableList.of(type))) {
             // skip a page to exercise the decoder's skip() logic
             Page firstPage = pageSource.getNextPage();
             assertTrue(firstPage.getPositionCount() > 0, "Expected first page to have at least 1 row");

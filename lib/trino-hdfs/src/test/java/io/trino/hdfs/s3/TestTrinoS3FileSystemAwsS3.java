@@ -11,12 +11,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.trino.plugin.hive.s3;
+package io.trino.hdfs.s3;
 
 import org.apache.hadoop.conf.Configuration;
 import org.testng.annotations.BeforeClass;
 
-import static io.trino.hadoop.ConfigurationInstantiator.newEmptyConfiguration;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -26,7 +25,7 @@ import static java.util.Objects.requireNonNull;
  * See https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html#credentials-default
  */
 public class TestTrinoS3FileSystemAwsS3
-        extends BaseTestTrinoS3FileSystemObjectStorage
+        extends AbstractTestTrinoS3FileSystem
 {
     private String bucketName;
     private String s3Endpoint;
@@ -47,7 +46,7 @@ public class TestTrinoS3FileSystemAwsS3
     @Override
     protected Configuration s3Configuration()
     {
-        Configuration config = newEmptyConfiguration();
+        Configuration config = new Configuration(false);
         config.set("fs.s3.endpoint", s3Endpoint);
         return config;
     }

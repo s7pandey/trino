@@ -29,7 +29,6 @@ import io.trino.hdfs.HdfsConfig;
 import io.trino.hdfs.HdfsConfiguration;
 import io.trino.hdfs.HdfsContext;
 import io.trino.hdfs.HdfsEnvironment;
-import io.trino.hdfs.HdfsNamenodeStats;
 import io.trino.hdfs.TrinoHdfsFileSystemStats;
 import io.trino.hdfs.authentication.NoHdfsAuthentication;
 import io.trino.operator.GroupByHashPageIndexerFactory;
@@ -214,7 +213,8 @@ public abstract class AbstractTestHiveFileSystem
                                 .build()),
                 getBasePath(),
                 hdfsEnvironment);
-        locationService = new HiveLocationService(hdfsEnvironment, config);
+        HdfsFileSystemFactory fileSystemFactory = new HdfsFileSystemFactory(hdfsEnvironment, HDFS_FILE_SYSTEM_STATS);
+        locationService = new HiveLocationService(fileSystemFactory, config);
         JsonCodec<PartitionUpdate> partitionUpdateCodec = JsonCodec.jsonCodec(PartitionUpdate.class);
         metadataFactory = new HiveMetadataFactory(
                 new CatalogName("hive"),
@@ -222,8 +222,7 @@ public abstract class AbstractTestHiveFileSystem
                 new HiveMetastoreConfig(),
                 HiveMetastoreFactory.ofInstance(metastoreClient),
                 getDefaultHiveFileWriterFactories(config, hdfsEnvironment),
-                new HdfsFileSystemFactory(hdfsEnvironment, HDFS_FILE_SYSTEM_STATS),
-                hdfsEnvironment,
+                fileSystemFactory,
                 hivePartitionManager,
                 newDirectExecutorService(),
                 heartbeatService,
@@ -246,8 +245,7 @@ public abstract class AbstractTestHiveFileSystem
         splitManager = new HiveSplitManager(
                 transactionManager,
                 hivePartitionManager,
-                new HdfsFileSystemFactory(hdfsEnvironment, HDFS_FILE_SYSTEM_STATS),
-                new HdfsNamenodeStats(),
+                fileSystemFactory,
                 new BoundedExecutor(executor, config.getMaxSplitIteratorThreads()),
                 new CounterStat(),
                 config.getMaxOutstandingSplits(),
@@ -262,7 +260,7 @@ public abstract class AbstractTestHiveFileSystem
                 config.getMaxPartitionsPerScan());
         pageSinkProvider = new HivePageSinkProvider(
                 getDefaultHiveFileWriterFactories(config, hdfsEnvironment),
-                new HdfsFileSystemFactory(hdfsEnvironment, HDFS_FILE_SYSTEM_STATS),
+                fileSystemFactory,
                 PAGE_SORTER,
                 HiveMetastoreFactory.ofInstance(metastoreClient),
                 new GroupByHashPageIndexerFactory(new JoinCompiler(new TypeOperators())),
@@ -478,7 +476,6 @@ public abstract class AbstractTestHiveFileSystem
                 Location.of(basePath.toString()),
                 trinoFileSystem,
                 new FileSystemDirectoryLister(),
-                new HdfsNamenodeStats(),
                 HiveFileIterator.NestedDirectoryPolicy.RECURSE);
 
         List<Path> recursiveListing = Streams.stream(recursiveIterator)
@@ -493,7 +490,6 @@ public abstract class AbstractTestHiveFileSystem
                 Location.of(basePath.toString()),
                 trinoFileSystem,
                 new FileSystemDirectoryLister(),
-                new HdfsNamenodeStats(),
                 HiveFileIterator.NestedDirectoryPolicy.IGNORED);
         List<Path> shallowListing = Streams.stream(shallowIterator)
                 .map(TrinoFileStatus::getPath)
@@ -594,7 +590,6 @@ public abstract class AbstractTestHiveFileSystem
                 Location.of(basePath.toString()),
                 trinoFileSystem,
                 new FileSystemDirectoryLister(),
-                new HdfsNamenodeStats(),
                 HiveFileIterator.NestedDirectoryPolicy.RECURSE);
 
         List<Path> recursiveListing = Streams.stream(recursiveIterator)
@@ -617,7 +612,6 @@ public abstract class AbstractTestHiveFileSystem
                 Location.of(basePath.toString()),
                 trinoFileSystem,
                 new FileSystemDirectoryLister(),
-                new HdfsNamenodeStats(),
                 HiveFileIterator.NestedDirectoryPolicy.IGNORED);
         List<Path> shallowListing = Streams.stream(shallowIterator)
                 .map(TrinoFileStatus::getPath)

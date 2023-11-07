@@ -5,7 +5,7 @@
     <parent>
         <groupId>io.trino</groupId>
         <artifactId>trino-root</artifactId>
-        <version>432-SNAPSHOT</version>
+        <version>433-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -1060,6 +1060,10 @@
                                     <new>method io.trino.spi.block.Block[] io.trino.spi.block.RowBlock::getRawFieldBlocks()</new>
                                     <oldVisibility>protected</oldVisibility>
                                     <newVisibility>package</newVisibility>
+                                </item>
+                                <item>
+                                    <code>java.method.addedToInterface</code>
+                                    <new>method java.lang.String io.trino.spi.security.SystemAccessControlFactory.SystemAccessControlContext::getVersion()</new>
                                 </item>
                             </differences>
                         </revapi.differences>

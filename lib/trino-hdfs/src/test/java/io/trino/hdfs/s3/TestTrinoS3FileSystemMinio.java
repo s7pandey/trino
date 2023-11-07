@@ -11,10 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.trino.plugin.hive.s3;
+package io.trino.hdfs.s3;
 
 import com.amazonaws.services.s3.AmazonS3;
-import io.trino.hdfs.s3.TrinoS3FileSystem;
 import io.trino.testing.containers.Minio;
 import io.trino.testing.minio.MinioClient;
 import io.trino.util.AutoCloseableCloser;
@@ -26,7 +25,6 @@ import org.testng.annotations.Test;
 
 import java.net.URI;
 
-import static io.trino.hadoop.ConfigurationInstantiator.newEmptyConfiguration;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.testing.containers.Minio.MINIO_ACCESS_KEY;
 import static io.trino.testing.containers.Minio.MINIO_SECRET_KEY;
@@ -35,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.testng.Assert.assertTrue;
 
 public class TestTrinoS3FileSystemMinio
-        extends BaseTestTrinoS3FileSystemObjectStorage
+        extends AbstractTestTrinoS3FileSystem
 {
     private final String bucketName = "test-bucket-" + randomNameSuffix();
 
@@ -75,7 +73,7 @@ public class TestTrinoS3FileSystemMinio
     @Override
     protected Configuration s3Configuration()
     {
-        Configuration config = newEmptyConfiguration();
+        Configuration config = new Configuration(false);
         config.set("trino.s3.endpoint", minio.getMinioAddress());
         config.set("trino.s3.access-key", MINIO_ACCESS_KEY);
         config.set("trino.s3.secret-key", MINIO_SECRET_KEY);
