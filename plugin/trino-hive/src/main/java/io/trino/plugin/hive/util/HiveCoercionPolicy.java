@@ -66,6 +66,7 @@ public final class HiveCoercionPolicy
                     toHiveType.equals(HIVE_SHORT) ||
                     toHiveType.equals(HIVE_INT) ||
                     toHiveType.equals(HIVE_LONG) ||
+                    toHiveType.equals(HIVE_DOUBLE) ||
                     toHiveType.equals(HIVE_DATE) ||
                     toHiveType.equals(HIVE_TIMESTAMP);
         }
@@ -82,14 +83,20 @@ public final class HiveCoercionPolicy
                     fromHiveType.equals(HIVE_DOUBLE) ||
                     fromType instanceof DecimalType;
         }
+        if (toHiveType.equals(HIVE_DATE)) {
+            return fromHiveType.equals(HIVE_TIMESTAMP);
+        }
         if (fromHiveType.equals(HIVE_BYTE)) {
-            return toHiveType.equals(HIVE_SHORT) || toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG);
+            return toHiveType.equals(HIVE_SHORT) || toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE);
         }
         if (fromHiveType.equals(HIVE_SHORT)) {
-            return toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG);
+            return toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE);
         }
         if (fromHiveType.equals(HIVE_INT)) {
-            return toHiveType.equals(HIVE_LONG);
+            return toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE);
+        }
+        if (fromHiveType.equals(HIVE_LONG)) {
+            return toHiveType.equals(HIVE_DOUBLE);
         }
         if (fromHiveType.equals(HIVE_FLOAT)) {
             return toHiveType.equals(HIVE_DOUBLE) || toType instanceof DecimalType;

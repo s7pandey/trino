@@ -18,6 +18,8 @@ import io.trino.plugin.hive.HiveTimestampPrecision;
 import io.trino.plugin.hive.HiveType;
 import io.trino.plugin.hive.coercions.BooleanCoercer.BooleanToVarcharCoercer;
 import io.trino.plugin.hive.coercions.DateCoercer.VarcharToDateCoercer;
+import io.trino.plugin.hive.coercions.TimestampCoercer.LongTimestampToDateCoercer;
+import io.trino.plugin.hive.coercions.TimestampCoercer.LongTimestampToVarcharCoercer;
 import io.trino.plugin.hive.coercions.TimestampCoercer.VarcharToLongTimestampCoercer;
 import io.trino.plugin.hive.coercions.TimestampCoercer.VarcharToShortTimestampCoercer;
 import io.trino.plugin.hive.type.Category;
@@ -103,6 +105,9 @@ public final class CoercionUtils
         if (fromType instanceof VarcharType fromVarcharType && (toHiveType.equals(HIVE_BYTE) || toHiveType.equals(HIVE_SHORT) || toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG))) {
             return Optional.of(new VarcharToIntegerNumberCoercer<>(fromVarcharType, toType));
         }
+        if (fromType instanceof VarcharType varcharType && toHiveType.equals(HIVE_DOUBLE)) {
+            return Optional.of(new VarcharToDoubleCoercer(varcharType, coercionContext.treatNaNAsNull()));
+        }
         if (fromType instanceof VarcharType varcharType && toType instanceof TimestampType timestampType) {
             if (timestampType.isShort()) {
                 return Optional.of(new VarcharToShortTimestampCoercer(varcharType, timestampType));
@@ -127,14 +132,32 @@ public final class CoercionUtils
             }
             return Optional.empty();
         }
-        if (fromHiveType.equals(HIVE_BYTE) && (toHiveType.equals(HIVE_SHORT) || toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG))) {
-            return Optional.of(new IntegerNumberUpscaleCoercer<>(fromType, toType));
+        if (fromHiveType.equals(HIVE_BYTE)) {
+            if (toHiveType.equals(HIVE_SHORT) || toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG)) {
+                return Optional.of(new IntegerNumberUpscaleCoercer<>(fromType, toType));
+            }
+            if (toHiveType.equals(HIVE_DOUBLE)) {
+                return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
+            }
         }
-        if (fromHiveType.equals(HIVE_SHORT) && (toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG))) {
-            return Optional.of(new IntegerNumberUpscaleCoercer<>(fromType, toType));
+        if (fromHiveType.equals(HIVE_SHORT)) {
+            if (toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG)) {
+                return Optional.of(new IntegerNumberUpscaleCoercer<>(fromType, toType));
+            }
+            if (toHiveType.equals(HIVE_DOUBLE)) {
+                return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
+            }
         }
-        if (fromHiveType.equals(HIVE_INT) && toHiveType.equals(HIVE_LONG)) {
-            return Optional.of(new IntegerToBigintCoercer());
+        if (fromHiveType.equals(HIVE_INT)) {
+            if (toHiveType.equals(HIVE_LONG)) {
+                return Optional.of(new IntegerToBigintCoercer());
+            }
+            if (toHiveType.equals(HIVE_DOUBLE)) {
+                return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
+            }
+        }
+        if (fromHiveType.equals(HIVE_LONG) && toHiveType.equals(HIVE_DOUBLE)) {
+            return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
         }
         if (fromHiveType.equals(HIVE_FLOAT) && toHiveType.equals(HIVE_DOUBLE)) {
             return Optional.of(new FloatToDoubleCoercer());
@@ -167,8 +190,14 @@ public final class CoercionUtils
         if (fromType == REAL && toType instanceof DecimalType toDecimalType) {
             return Optional.of(createRealToDecimalCoercer(toDecimalType));
         }
-        if (fromType instanceof TimestampType && toType instanceof VarcharType varcharType) {
-            return Optional.of(new TimestampCoercer.LongTimestampToVarcharCoercer(TIMESTAMP_NANOS, varcharType));
+        if (fromType instanceof TimestampType) {
+            if (toType instanceof VarcharType varcharType) {
+                return Optional.of(new LongTimestampToVarcharCoercer(TIMESTAMP_NANOS, varcharType));
+            }
+            if (toType instanceof DateType toDateType) {
+                return Optional.of(new LongTimestampToDateCoercer(TIMESTAMP_NANOS, toDateType));
+            }
+            return Optional.empty();
         }
         if (fromType == DOUBLE && toType instanceof VarcharType toVarcharType) {
             return Optional.of(new DoubleToVarcharCoercer(toVarcharType, coercionContext.treatNaNAsNull()));

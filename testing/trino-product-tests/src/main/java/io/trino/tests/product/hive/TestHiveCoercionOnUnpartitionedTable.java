@@ -56,9 +56,13 @@ public class TestHiveCoercionOnUnpartitionedTable
                             tinyint_to_smallint                TINYINT,
                             tinyint_to_int                     TINYINT,
                             tinyint_to_bigint                  TINYINT,
+                            tinyint_to_double                  TINYINT,
                             smallint_to_int                    SMALLINT,
                             smallint_to_bigint                 SMALLINT,
+                            smallint_to_double                 SMALLINT,
                             int_to_bigint                      INT,
+                            int_to_double                      INT,
+                            bigint_to_double                   BIGINT,
                             bigint_to_varchar                  BIGINT,
                             float_to_double                    FLOAT,
                             double_to_float                    DOUBLE,
@@ -91,8 +95,15 @@ public class TestHiveCoercionOnUnpartitionedTable
                             varchar_to_smaller_varchar         VARCHAR(3),
                             varchar_to_date                    VARCHAR(10),
                             varchar_to_distant_date            VARCHAR(12),
+                            varchar_to_double                  VARCHAR(40),
+                            string_to_double                   STRING,
+                            varchar_to_double_infinity         VARCHAR(40),
+                            varchar_to_special_double          VARCHAR(40),
                             char_to_bigger_char                CHAR(3),
                             char_to_smaller_char               CHAR(3),
+                            timestamp_millis_to_date           TIMESTAMP,
+                            timestamp_micros_to_date           TIMESTAMP,
+                            timestamp_nanos_to_date            TIMESTAMP,
                             timestamp_to_string                TIMESTAMP,
                             timestamp_to_bounded_varchar       TIMESTAMP,
                             timestamp_to_smaller_varchar       TIMESTAMP,
@@ -108,11 +119,12 @@ public class TestHiveCoercionOnUnpartitionedTable
         return HiveTableDefinition.builder(tableName)
                 .setCreateTableDDLTemplate("""
                          CREATE TABLE %NAME%(
-                             timestamp_row_to_row       STRUCT<keep: TIMESTAMP, si2i: SMALLINT, timestamp2string: TIMESTAMP, string2timestamp: STRING>,
-                             timestamp_list_to_list     ARRAY<STRUCT<keep: TIMESTAMP, si2i: SMALLINT, timestamp2string: TIMESTAMP, string2timestamp: STRING>>,
-                             timestamp_map_to_map       MAP<SMALLINT, STRUCT<keep: TIMESTAMP, si2i: SMALLINT, timestamp2string: TIMESTAMP, string2timestamp: STRING>>,
+                             timestamp_row_to_row       STRUCT<keep: TIMESTAMP, si2i: SMALLINT, timestamp2string: TIMESTAMP, string2timestamp: STRING, timestamp2date: TIMESTAMP>,
+                             timestamp_list_to_list     ARRAY<STRUCT<keep: TIMESTAMP, si2i: SMALLINT, timestamp2string: TIMESTAMP, string2timestamp: STRING, timestamp2date: TIMESTAMP>>,
+                             timestamp_map_to_map       MAP<SMALLINT, STRUCT<keep: TIMESTAMP, si2i: SMALLINT, timestamp2string: TIMESTAMP, string2timestamp: STRING, timestamp2date: TIMESTAMP>>,
                              timestamp_to_string        TIMESTAMP,
                              string_to_timestamp        STRING,
+                             timestamp_to_date          TIMESTAMP,
                              id                         BIGINT)
                         STORED AS\s""" + fileFormat);
     }

@@ -112,6 +112,7 @@ import static io.trino.plugin.iceberg.IcebergFileFormat.ORC;
 import static io.trino.plugin.iceberg.IcebergFileFormat.PARQUET;
 import static io.trino.plugin.iceberg.IcebergQueryRunner.ICEBERG_CATALOG;
 import static io.trino.plugin.iceberg.IcebergSessionProperties.COLLECT_EXTENDED_STATISTICS_ON_WRITE;
+import static io.trino.plugin.iceberg.IcebergSessionProperties.DYNAMIC_FILTERING_WAIT_TIMEOUT;
 import static io.trino.plugin.iceberg.IcebergSessionProperties.EXTENDED_STATISTICS_ENABLED;
 import static io.trino.plugin.iceberg.IcebergSplitManager.ICEBERG_DOMAIN_COMPACTION_THRESHOLD;
 import static io.trino.plugin.iceberg.IcebergTestUtils.getFileSystemFactory;
@@ -6701,30 +6702,6 @@ public abstract class BaseIcebergConnectorTest
                 "WHEN MATCHED THEN UPDATE SET b = t.b * 50", tableName, sourceTableName)));
     }
 
-    @Test
-    public void testMaterializedViewSnapshotSummariesHaveTrinoQueryId()
-    {
-        String matViewName = "test_materialized_view_snapshot_query_ids" + randomNameSuffix();
-        String sourceTableName = "test_source_table_for_mat_view" + randomNameSuffix();
-        assertUpdate(format("CREATE TABLE %s (a bigint, b bigint)", sourceTableName));
-        assertUpdate(format("INSERT INTO %s VALUES (1, 1), (1, 4), (2, 2)", sourceTableName), 3);
-
-        // create a materialized view
-        QueryId matViewCreateQueryId = getDistributedQueryRunner()
-                .executeWithQueryId(getSession(), format("CREATE MATERIALIZED VIEW %s WITH (partitioning = ARRAY['a']) AS SELECT * FROM %s", matViewName, sourceTableName))
-                .getQueryId();
-
-        // fetch the underlying storage table name so we can inspect its snapshot summary after the REFRESH
-        // running queries against "materialized_view$snapshots" is not supported
-        String storageTable = (String) getDistributedQueryRunner()
-                .execute(getSession(), format("SELECT storage_table FROM system.metadata.materialized_views WHERE name = '%s'", matViewName))
-                .getOnlyValue();
-
-        assertQueryIdStored(storageTable, matViewCreateQueryId);
-
-        assertQueryIdStored(storageTable, executeWithQueryId(format("REFRESH MATERIALIZED VIEW %s", matViewName)));
-    }
-
     @Override
     protected OptionalInt maxTableNameLength()
     {
@@ -7296,6 +7273,24 @@ public abstract class BaseIcebergConnectorTest
         return Session.builder(session)
                 .setCatalogSessionProperty("iceberg", "query_partition_filter_required", "true")
                 .build();
+    }
+
+    @Test
+    public void testUuidDynamicFilter()
+    {
+        String catalog = getSession().getCatalog().orElseThrow();
+        try (TestTable dataTable = new TestTable(getQueryRunner()::execute, "data_table", "(value uuid)");
+                TestTable filteringTable = new TestTable(getQueryRunner()::execute, "filtering_table", "(filtering_value uuid)")) {
+            assertUpdate("INSERT INTO " + dataTable.getName() + " VALUES UUID 'f73894f0-5447-41c5-a727-436d04c7f8ab', UUID '4f676658-67c9-4e80-83be-ec75f0b9d0c9'", 2);
+            assertUpdate("INSERT INTO " + filteringTable.getName() + " VALUES UUID 'f73894f0-5447-41c5-a727-436d04c7f8ab'", 1);
+
+            assertThat(query(
+                    Session.builder(getSession())
+                            .setCatalogSessionProperty(catalog, DYNAMIC_FILTERING_WAIT_TIMEOUT, "10s")
+                            .build(),
+                    "SELECT value FROM " + dataTable.getName() + " WHERE EXISTS (SELECT 1 FROM " + filteringTable.getName() + " WHERE filtering_value = value)"))
+                    .matches("VALUES UUID 'f73894f0-5447-41c5-a727-436d04c7f8ab'");
+        }
     }
 
     @Override
