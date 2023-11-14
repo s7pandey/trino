@@ -23,31 +23,40 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-
-public class ConfluentSchemaRegistryClientPropertiesProvider implements SchemaRegistryClientPropertiesProvider {
-
+/**
+ * This is a javadoc.
+ */
+public class ConfluentSchemaRegistryClientPropertiesProvider
+        implements SchemaRegistryClientPropertiesProvider
+{
     private final Map<String, Object> confluentSchemaRegistryClientProperties = new HashMap<>();
+
+    private static final String SCHEMA_REGISTRY_PREFIX = "schema.registry";
 
     @Inject
     public ConfluentSchemaRegistryClientPropertiesProvider(
-            ConfluentSchemaRegistryConfig confluentSchemaRegistryConfig,
-            KafkaSslConfig kafkaSslConfig,
-            KafkaConfig kafkaConfig) throws IOException {
-
+            final ConfluentSchemaRegistryConfig confluentSchemaRegistryConfig,
+            final KafkaSslConfig kafkaSslConfig,
+            final KafkaConfig kafkaConfig)
+            throws IOException
+    {
         if (confluentSchemaRegistryConfig.getInheritKafkaSslConfiguration()) {
-            confluentSchemaRegistryClientProperties.putAll(kafkaSslConfig.getKafkaClientProperties());
+            confluentSchemaRegistryClientProperties.putAll(
+                    kafkaSslConfig.getKafkaClientProperties());
         }
 
-        Map<String, String> schemaRegistryFileProperties = PropertiesUtils.readProperties(kafkaConfig.getResourceConfigFiles())
+        Map<String, String> schemaRegistryFileProperties = PropertiesUtils.readProperties(
+                        kafkaConfig.getResourceConfigFiles())
                 .entrySet().stream()
-                .filter(entry -> entry.getKey().startsWith("schema.registry"))
+                .filter(entry -> entry.getKey().startsWith(SCHEMA_REGISTRY_PREFIX))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         confluentSchemaRegistryClientProperties.putAll(schemaRegistryFileProperties);
     }
 
     @Override
-    public Map<String, Object> getSchemaRegistryClientProperties() {
+    public final Map<String, Object> getSchemaRegistryClientProperties()
+    {
         return confluentSchemaRegistryClientProperties;
     }
 }
