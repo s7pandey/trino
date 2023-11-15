@@ -23,8 +23,7 @@ import io.trino.testing.MaterializedResult;
 import io.trino.testing.TestingConnectorBehavior;
 import io.trino.testing.sql.SqlExecutor;
 import io.trino.testing.sql.TestTable;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -103,7 +102,7 @@ public abstract class BaseMySqlConnectorTest
                 "(one bigint, two decimal(50,0), three varchar(10))");
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     @Override
     public void testShowColumns()
     {
@@ -165,6 +164,7 @@ public abstract class BaseMySqlConnectorTest
                 .build();
     }
 
+    @Test
     @Override
     public void testShowCreateTable()
     {
@@ -182,6 +182,7 @@ public abstract class BaseMySqlConnectorTest
                         ")");
     }
 
+    @Test
     @Override
     public void testDeleteWithLike()
     {
@@ -262,6 +263,7 @@ public abstract class BaseMySqlConnectorTest
         assertUpdate("DROP TABLE test_column_comment");
     }
 
+    @Test
     @Override
     public void testAddNotNullColumn()
     {
@@ -379,16 +381,28 @@ public abstract class BaseMySqlConnectorTest
                 .isFullyPushedDown();
     }
 
-    @Test(dataProvider = "charsetAndCollation")
-    public void testPredicatePushdownWithCollationView(String charset, String collation)
+    @Test
+    public void testPredicatePushdownWithCollationView()
+    {
+        testPredicatePushdownWithCollationView("latin1", "latin1_general_cs");
+        testPredicatePushdownWithCollationView("utf8", "utf8_bin");
+    }
+
+    private void testPredicatePushdownWithCollationView(String charset, String collation)
     {
         onRemoteDatabase().execute(format("CREATE OR REPLACE VIEW tpch.test_view_pushdown AS SELECT regionkey, nationkey, CONVERT(name USING %s) COLLATE %s AS name FROM tpch.nation;", charset, collation));
         testNationCollationQueries("test_view_pushdown");
         onRemoteDatabase().execute("DROP VIEW tpch.test_view_pushdown");
     }
 
-    @Test(dataProvider = "charsetAndCollation")
-    public void testPredicatePushdownWithCollation(String charset, String collation)
+    @Test
+    public void testPredicatePushdownWithCollation()
+    {
+        testPredicatePushdownWithCollation("latin1", "latin1_general_cs");
+        testPredicatePushdownWithCollation("utf8", "utf8_bin");
+    }
+
+    private void testPredicatePushdownWithCollation(String charset, String collation)
     {
         try (TestTable testTable = new TestTable(
                 onRemoteDatabase(),
@@ -474,12 +488,6 @@ public abstract class BaseMySqlConnectorTest
                 .joinIsNotFullyPushedDown();
     }
 
-    @DataProvider
-    public static Object[][] charsetAndCollation()
-    {
-        return new Object[][] {{"latin1", "latin1_general_cs"}, {"utf8", "utf8_bin"}};
-    }
-
     /**
      * This test helps to tune TupleDomain simplification threshold.
      */
@@ -504,6 +512,7 @@ public abstract class BaseMySqlConnectorTest
         onRemoteDatabase().execute("SELECT count(*) FROM tpch.orders WHERE " + longInClauses);
     }
 
+    @Test
     @Override
     public void testNativeQueryInsertStatementTableDoesNotExist()
     {
@@ -513,6 +522,7 @@ public abstract class BaseMySqlConnectorTest
                 .hasMessageContaining("Query not supported: ResultSetMetaData not available for query: INSERT INTO non_existent_table VALUES (1)");
     }
 
+    @Test
     @Override
     public void testNativeQueryIncorrectSyntax()
     {
