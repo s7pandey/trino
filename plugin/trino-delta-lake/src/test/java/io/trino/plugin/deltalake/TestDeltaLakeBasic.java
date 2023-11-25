@@ -43,6 +43,7 @@ import io.trino.testing.TestingSession;
 import org.apache.parquet.hadoop.metadata.FileMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.PrimitiveType;
+import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -82,7 +83,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
 import static org.junit.jupiter.api.parallel.ExecutionMode.SAME_THREAD;
-import static org.testng.Assert.assertFalse;
 
 @TestInstance(PER_CLASS)
 @Execution(SAME_THREAD)
@@ -200,8 +200,9 @@ public class TestDeltaLakeBasic
 
         assertUpdate("ALTER TABLE " + tableName + " ADD COLUMN second_col row(a array(integer), b map(integer, integer), c row(field integer))");
         MetadataEntry metadata = loadMetadataEntry(1, tableLocation);
-        assertThat(metadata.getConfiguration().get("delta.columnMapping.maxColumnId"))
-                .isEqualTo("6"); // +5 comes from second_col + second_col.a + second_col.b + second_col.c + second_col.c.field
+        assertThat(metadata.getConfiguration()).containsEntry(
+                "delta.columnMapping.maxColumnId",
+                "6"); // +5 comes from second_col + second_col.a + second_col.b + second_col.c + second_col.c.field
 
         JsonNode schema = OBJECT_MAPPER.readTree(metadata.getSchemaString());
         List<JsonNode> fields = ImmutableList.copyOf(schema.get("fields").elements());
@@ -301,8 +302,8 @@ public class TestDeltaLakeBasic
         assertThat(transactionLog.get(4).getAdd()).isNotNull();
         AddFileEntry addFileEntry = transactionLog.get(4).getAdd();
         DeltaLakeFileStatistics stats = addFileEntry.getStats().orElseThrow();
-        assertThat(stats.getMinValues().orElseThrow().get(physicalName)).isEqualTo(10);
-        assertThat(stats.getMaxValues().orElseThrow().get(physicalName)).isEqualTo(20);
+        assertThat(stats.getMinValues().orElseThrow()).containsEntry(physicalName, 10);
+        assertThat(stats.getMaxValues().orElseThrow()).containsEntry(physicalName, 20);
         assertThat(stats.getNullCount(physicalName).orElseThrow()).isEqualTo(1);
 
         // Verify optimized parquet file contains the expected physical id and name
@@ -347,8 +348,7 @@ public class TestDeltaLakeBasic
 
         assertUpdate("ALTER TABLE " + tableName + " ADD COLUMN second_col row(a array(integer), b map(integer, integer), c row(field integer))");
         MetadataEntry metadata = loadMetadataEntry(1, tableLocation);
-        assertThat(metadata.getConfiguration().get("delta.columnMapping.maxColumnId"))
-                .isEqualTo("6"); // +5 comes from second_col + second_col.a + second_col.b + second_col.c + second_col.c.field
+        assertThat(metadata.getConfiguration()).containsEntry("delta.columnMapping.maxColumnId", "6"); // +5 comes from second_col + second_col.a + second_col.b + second_col.c + second_col.c.field
         assertThat(metadata.getSchemaString())
                 .containsPattern("(delta\\.columnMapping\\.id.*?){6}")
                 .containsPattern("(delta\\.columnMapping\\.physicalName.*?){6}");
@@ -401,8 +401,7 @@ public class TestDeltaLakeBasic
 
         assertUpdate("ALTER TABLE " + tableName + " ADD COLUMN second_col row(a array(integer), b map(integer, integer), c row(field integer))");
         MetadataEntry metadata = loadMetadataEntry(1, tableLocation);
-        assertThat(metadata.getConfiguration().get("delta.columnMapping.maxColumnId"))
-                .isEqualTo("6"); // +5 comes from second_col + second_col.a + second_col.b + second_col.c + second_col.c.field
+        assertThat(metadata.getConfiguration()).containsEntry("delta.columnMapping.maxColumnId", "6"); // +5 comes from second_col + second_col.a + second_col.b + second_col.c + second_col.c.field
         assertThat(metadata.getSchemaString())
                 .containsPattern("(delta\\.columnMapping\\.id.*?){6}")
                 .containsPattern("(delta\\.columnMapping\\.physicalName.*?){6}");
@@ -522,8 +521,8 @@ public class TestDeltaLakeBasic
         assertThat(transactionLog).hasSize(2);
         AddFileEntry addFileEntry = transactionLog.get(1).getAdd();
         DeltaLakeFileStatistics stats = addFileEntry.getStats().orElseThrow();
-        assertThat(stats.getMinValues().orElseThrow().get("UPPER_CASE")).isEqualTo(10);
-        assertThat(stats.getMaxValues().orElseThrow().get("UPPER_CASE")).isEqualTo(20);
+        assertThat(stats.getMinValues().orElseThrow()).containsEntry("UPPER_CASE", 10);
+        assertThat(stats.getMaxValues().orElseThrow()).containsEntry("UPPER_CASE", 20);
         assertThat(stats.getNullCount("UPPER_CASE").orElseThrow()).isEqualTo(1);
 
         assertUpdate("UPDATE " + tableName + " SET upper_case = upper_case + 10", 3);
@@ -532,8 +531,8 @@ public class TestDeltaLakeBasic
         assertThat(transactionLogAfterUpdate).hasSize(3);
         AddFileEntry updateAddFileEntry = transactionLogAfterUpdate.get(2).getAdd();
         DeltaLakeFileStatistics updateStats = updateAddFileEntry.getStats().orElseThrow();
-        assertThat(updateStats.getMinValues().orElseThrow().get("UPPER_CASE")).isEqualTo(20);
-        assertThat(updateStats.getMaxValues().orElseThrow().get("UPPER_CASE")).isEqualTo(30);
+        assertThat(updateStats.getMinValues().orElseThrow()).containsEntry("UPPER_CASE", 20);
+        assertThat(updateStats.getMaxValues().orElseThrow()).containsEntry("UPPER_CASE", 30);
         assertThat(updateStats.getNullCount("UPPER_CASE").orElseThrow()).isEqualTo(1);
 
         assertQuery(
@@ -980,7 +979,7 @@ public class TestDeltaLakeBasic
 
         // DROP TABLE should succeed so that users can remove their corrupted table
         getQueryRunner().execute("DROP TABLE " + tableName);
-        assertFalse(getQueryRunner().tableExists(getSession(), tableName));
+        assertThat(getQueryRunner().tableExists(getSession(), tableName)).isFalse();
         if (isManaged) {
             assertThat(tableLocation.toFile()).doesNotExist().as("Table location should not exist");
         }
@@ -1030,6 +1029,110 @@ public class TestDeltaLakeBasic
         assertUpdate("CALL system.register_table('%s', '%s', '%s')".formatted(getSession().getSchema().orElseThrow(), tableName, tableLocation.toUri()));
         assertThat(query("DESCRIBE " + tableName)).projected("Column", "Type").skippingTypesCheck().matches("VALUES ('c', 'integer')");
         assertThat(query("SELECT * FROM " + tableName)).matches("VALUES 1, 2, 3, 4, 5, 6, 7");
+    }
+
+    /**
+     * @see deltalake.partition_values_parsed
+     */
+    @Test
+    public void testDeltaLakeWithPartitionValuesParsed()
+            throws Exception
+    {
+        testPartitionValuesParsed("deltalake/partition_values_parsed");
+    }
+
+    /**
+     * @see trino432.partition_values_parsed
+     */
+    @Test
+    public void testTrinoWithoutPartitionValuesParsed()
+            throws Exception
+    {
+        testPartitionValuesParsed("trino432/partition_values_parsed");
+    }
+
+    private void testPartitionValuesParsed(String resourceName)
+            throws Exception
+    {
+        String tableName = "test_partition_values_parsed_checkpoint_" + randomNameSuffix();
+        Path tableLocation = Files.createTempFile(tableName, null);
+        copyDirectoryContents(new File(Resources.getResource(resourceName).toURI()).toPath(), tableLocation);
+        assertUpdate("CALL system.register_table('%s', '%s', '%s')".formatted(getSession().getSchema().orElseThrow(), tableName, tableLocation.toUri()));
+
+        Session session = Session.builder(getQueryRunner().getDefaultSession())
+                .setCatalogSessionProperty("delta", "checkpoint_filtering_enabled", "true")
+                .build();
+
+        assertThat(query(session, "SELECT id FROM " + tableName + " WHERE int_part = 10 AND string_part = 'part1'"))
+                .matches("VALUES 1");
+        assertThat(query(session, "SELECT id FROM " + tableName + " WHERE int_part != 10"))
+                .matches("VALUES 2");
+        assertThat(query(session, "SELECT id FROM " + tableName + " WHERE int_part > 10"))
+                .matches("VALUES 2");
+        assertThat(query(session, "SELECT id FROM " + tableName + " WHERE int_part >= 10"))
+                .matches("VALUES 1, 2");
+        assertThat(query(session, "SELECT id FROM " + tableName + " WHERE int_part IN (10, 20)"))
+                .matches("VALUES 1, 2");
+        assertThat(query("SELECT id FROM " + tableName + " WHERE int_part IS NULL AND string_part IS NULL"))
+                .matches("VALUES 3");
+        assertThat(query("SELECT id FROM " + tableName + " WHERE int_part IS NOT NULL AND string_part IS NOT NULL"))
+                .matches("VALUES 1, 2");
+
+        assertThat(query("SELECT id FROM " + tableName + " WHERE int_part = 10 AND string_part = 'unmatched partition condition'"))
+                .returnsEmptyResult();
+        assertThat(query("SELECT id FROM " + tableName + " WHERE int_part IS NULL AND string_part IS NOT NULL"))
+                .returnsEmptyResult();
+    }
+
+    /**
+     * @see deltalake.partition_values_parsed_all_types
+     */
+    @Test
+    public void testDeltaLakeWithPartitionValuesParsedAllTypes()
+            throws Exception
+    {
+        String tableName = "test_partition_values_parsed_checkpoint_" + randomNameSuffix();
+        Path tableLocation = Files.createTempFile(tableName, null);
+        copyDirectoryContents(new File(Resources.getResource("deltalake/partition_values_parsed_all_types").toURI()).toPath(), tableLocation);
+        assertUpdate("CALL system.register_table('%s', '%s', '%s')".formatted(getSession().getSchema().orElseThrow(), tableName, tableLocation.toUri()));
+
+        assertPartitionValuesParsedCondition(tableName, 1, "part_boolean = true");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_tinyint = 1");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_smallint = 10");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_int = 100");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_bigint = 1000");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_short_decimal = CAST('123.12' AS DECIMAL(5,2))");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_long_decimal = CAST('123456789012345678.123' AS DECIMAL(21,3))");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_double = 1.2");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_float = 3.4");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_varchar = 'a'");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_date = DATE '2020-08-21'");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_timestamp = TIMESTAMP '2020-10-21 01:00:00.123 UTC'");
+        assertPartitionValuesParsedCondition(tableName, 1, "part_timestamp_ntz = TIMESTAMP '2023-01-02 01:02:03.456'");
+
+        assertPartitionValuesParsedCondition(tableName, 3, "part_boolean IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_tinyint IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_smallint IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_int IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_bigint IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_short_decimal IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_long_decimal IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_double IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_float IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_varchar IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_date IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_timestamp IS NULL");
+        assertPartitionValuesParsedCondition(tableName, 3, "part_timestamp_ntz IS NULL");
+    }
+
+    private void assertPartitionValuesParsedCondition(String tableName, int id, @Language("SQL") String condition)
+    {
+        Session session = Session.builder(getQueryRunner().getDefaultSession())
+                .setCatalogSessionProperty("delta", "checkpoint_filtering_enabled", "true")
+                .build();
+
+        assertThat(query(session, "SELECT id FROM " + tableName + " WHERE " + condition))
+                .matches("VALUES " + id);
     }
 
     private static MetadataEntry loadMetadataEntry(long entryNumber, Path tableLocation)

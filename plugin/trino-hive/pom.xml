@@ -127,8 +127,18 @@
         </dependency>
 
         <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-context</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-aws-sdk-1.11</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.opentelemetry.semconv</groupId>
+            <artifactId>opentelemetry-semconv</artifactId>
         </dependency>
 
         <dependency>
@@ -213,11 +223,6 @@
 
         <dependency>
             <groupId>org.apache.parquet</groupId>
-            <artifactId>parquet-common</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.parquet</groupId>
             <artifactId>parquet-format-structures</artifactId>
         </dependency>
 
@@ -284,14 +289,14 @@
         </dependency>
 
         <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-context</artifactId>
+            <groupId>jakarta.xml.bind</groupId>
+            <artifactId>jakarta.xml.bind-api</artifactId>
             <scope>runtime</scope>
         </dependency>
 
         <dependency>
-            <groupId>jakarta.xml.bind</groupId>
-            <artifactId>jakarta.xml.bind-api</artifactId>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-common</artifactId>
             <scope>runtime</scope>
         </dependency>
 
@@ -532,7 +537,7 @@
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
                             <excludes>
-                                <exclude>**/TestHiveGlueMetastore.java</exclude>
+                                <exclude>**/TestGlueHiveMetastore.java</exclude>
                                 <exclude>**/TestHiveS3AndGlueMetastoreTest.java</exclude>
                                 <exclude>**/TestHiveConcurrentModificationGlueMetastore.java</exclude>
                                 <exclude>**/TestFullParquetReader.java</exclude>
@@ -589,7 +594,7 @@
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
                             <includes>
-                                <include>**/TestHiveGlueMetastore.java</include>
+                                <include>**/TestGlueHiveMetastore.java</include>
                                 <include>**/TestHiveS3AndGlueMetastoreTest.java</include>
                                 <include>**/TestHiveConcurrentModificationGlueMetastore.java</include>
                             </includes>

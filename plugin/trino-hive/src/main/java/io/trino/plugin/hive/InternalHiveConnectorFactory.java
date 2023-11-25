@@ -39,7 +39,6 @@ import io.trino.plugin.base.classloader.ClassLoaderSafeNodePartitioningProvider;
 import io.trino.plugin.base.jmx.ConnectorObjectNameGeneratorModule;
 import io.trino.plugin.base.jmx.MBeanServerModule;
 import io.trino.plugin.base.session.SessionPropertiesProvider;
-import io.trino.plugin.hive.aws.athena.PartitionProjectionModule;
 import io.trino.plugin.hive.fs.CachingDirectoryListerModule;
 import io.trino.plugin.hive.fs.DirectoryLister;
 import io.trino.plugin.hive.metastore.HiveMetastore;
@@ -62,6 +61,8 @@ import io.trino.spi.connector.ConnectorSplitManager;
 import io.trino.spi.connector.MetadataProvider;
 import io.trino.spi.connector.TableProcedureMetadata;
 import io.trino.spi.eventlistener.EventListener;
+import io.trino.spi.function.FunctionProvider;
+import io.trino.spi.function.table.ConnectorTableFunction;
 import io.trino.spi.procedure.Procedure;
 import org.weakref.jmx.guice.MBeanModule;
 
@@ -104,7 +105,6 @@ public final class InternalHiveConnectorFactory
                     new JsonModule(),
                     new TypeDeserializerModule(context.getTypeManager()),
                     new HiveModule(),
-                    new PartitionProjectionModule(),
                     new CachingDirectoryListerModule(directoryLister),
                     new HiveMetastoreModule(metastore),
                     new HiveSecurityModule(),
@@ -173,6 +173,8 @@ public final class InternalHiveConnectorFactory
                     hiveAnalyzeProperties.getAnalyzeProperties(),
                     hiveMaterializedViewPropertiesProvider.getMaterializedViewProperties(),
                     hiveAccessControl,
+                    injector.getInstance(Key.get(new TypeLiteral<Set<ConnectorTableFunction>>() {})),
+                    injector.getInstance(FunctionProvider.class),
                     injector.getInstance(HiveConfig.class).isSingleStatementWritesOnly(),
                     classLoader);
         }
