@@ -45,13 +45,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
-import java.util.Properties;
 import java.util.Set;
 import java.util.function.LongPredicate;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.io.Resources.getResource;
+import static io.trino.hive.thrift.metastore.hive_metastoreConstants.FILE_INPUT_FORMAT;
 import static io.trino.plugin.hive.HiveColumnHandle.ColumnType.REGULAR;
 import static io.trino.plugin.hive.HiveColumnHandle.createBaseColumn;
 import static io.trino.plugin.hive.HiveStorageFormat.ORC;
@@ -68,10 +68,8 @@ import static io.trino.tpch.NationColumn.NAME;
 import static io.trino.tpch.NationColumn.NATION_KEY;
 import static io.trino.tpch.NationColumn.REGION_KEY;
 import static java.util.Collections.nCopies;
-import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
 
 public class TestOrcPageSourceFactory
 {
@@ -144,7 +142,7 @@ public class TestOrcPageSourceFactory
                 .build();
 
         List<Nation> result = readFile(fileSystemFactory, Map.of(), OptionalLong.empty(), acidInfo, fileLocation, 625);
-        assertEquals(result.size(), 1);
+        assertThat(result.size()).isEqualTo(1);
     }
 
     @Test
@@ -182,11 +180,12 @@ public class TestOrcPageSourceFactory
         List<Nation> expected = expectedResult(OptionalLong.empty(), nationKey -> nationKey == 24, 1);
         List<Nation> result = readFile(fileSystemFactory, ALL_COLUMNS, OptionalLong.empty(), Optional.of(acidInfo), fileLocation, 1780);
 
-        assertEquals(result.size(), expected.size());
+        assertThat(result.size()).isEqualTo(expected.size());
         int deletedRowKey = 24;
         String deletedRowNameColumn = "UNITED STATES";
-        assertFalse(result.stream().anyMatch(acidNationRow -> acidNationRow.getName().equals(deletedRowNameColumn) && acidNationRow.getNationKey() == deletedRowKey),
-                "Deleted row shouldn't be present in the result");
+        assertThat(result.stream().anyMatch(acidNationRow -> acidNationRow.getName().equals(deletedRowNameColumn) && acidNationRow.getNationKey() == deletedRowKey))
+                .describedAs("Deleted row shouldn't be present in the result")
+                .isFalse();
     }
 
     private static void assertRead(Map<NationColumn, Integer> columns, OptionalLong nationKeyPredicate, Optional<AcidInfo> acidInfo, LongPredicate deletedRows)
@@ -328,25 +327,27 @@ public class TestOrcPageSourceFactory
                 Optional.empty());
     }
 
-    private static Properties createSchema()
+    private static Map<String, String> createSchema()
     {
-        Properties schema = new Properties();
-        schema.setProperty(SERIALIZATION_LIB, ORC.getSerde());
-        schema.setProperty(FILE_INPUT_FORMAT, ORC.getInputFormat());
-        schema.setProperty(TRANSACTIONAL, "true");
-        return schema;
+        return ImmutableMap.<String, String>builder()
+                .put(SERIALIZATION_LIB, ORC.getSerde())
+                .put(FILE_INPUT_FORMAT, ORC.getInputFormat())
+                .put(TRANSACTIONAL, "true")
+                .buildOrThrow();
     }
 
     private static void assertEqualsByColumns(Set<NationColumn> columns, List<Nation> actualRows, List<Nation> expectedRows)
     {
-        assertEquals(actualRows.size(), expectedRows.size(), "row count");
+        assertThat(actualRows.size())
+                .describedAs("row count")
+                .isEqualTo(expectedRows.size());
         for (int i = 0; i < actualRows.size(); i++) {
             Nation actual = actualRows.get(i);
             Nation expected = expectedRows.get(i);
-            assertEquals(actual.getNationKey(), columns.contains(NATION_KEY) ? expected.getNationKey() : -42);
-            assertEquals(actual.getName(), columns.contains(NAME) ? expected.getName() : "<not read>");
-            assertEquals(actual.getRegionKey(), columns.contains(REGION_KEY) ? expected.getRegionKey() : -42);
-            assertEquals(actual.getComment(), columns.contains(COMMENT) ? expected.getComment() : "<not read>");
+            assertThat(actual.getNationKey()).isEqualTo(columns.contains(NATION_KEY) ? expected.getNationKey() : -42);
+            assertThat(actual.getName()).isEqualTo(columns.contains(NAME) ? expected.getName() : "<not read>");
+            assertThat(actual.getRegionKey()).isEqualTo(columns.contains(REGION_KEY) ? expected.getRegionKey() : -42);
+            assertThat(actual.getComment()).isEqualTo(columns.contains(COMMENT) ? expected.getComment() : "<not read>");
         }
     }
 

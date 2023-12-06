@@ -80,6 +80,7 @@ import io.trino.spi.connector.MaterializedViewFreshness;
 import io.trino.spi.connector.ProjectionApplicationResult;
 import io.trino.spi.connector.RelationColumnsMetadata;
 import io.trino.spi.connector.RelationCommentMetadata;
+import io.trino.spi.connector.RelationType;
 import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.RowChangeParadigm;
 import io.trino.spi.connector.SaveMode;
@@ -251,8 +252,6 @@ import static io.trino.plugin.iceberg.IcebergUtil.schemaFromMetadata;
 import static io.trino.plugin.iceberg.PartitionFields.parsePartitionFields;
 import static io.trino.plugin.iceberg.PartitionFields.toPartitionFields;
 import static io.trino.plugin.iceberg.SortFieldUtils.parseSortFields;
-import static io.trino.plugin.iceberg.TableStatisticsReader.TRINO_STATS_COLUMN_ID_PATTERN;
-import static io.trino.plugin.iceberg.TableStatisticsReader.TRINO_STATS_PREFIX;
 import static io.trino.plugin.iceberg.TableStatisticsWriter.StatsUpdateMode.INCREMENTAL_UPDATE;
 import static io.trino.plugin.iceberg.TableStatisticsWriter.StatsUpdateMode.REPLACE;
 import static io.trino.plugin.iceberg.TableType.DATA;
@@ -288,7 +287,6 @@ import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
 import static java.util.stream.Collectors.joining;
 import static org.apache.iceberg.ReachableFileUtil.metadataFileLocations;
-import static org.apache.iceberg.ReachableFileUtil.versionHintLocation;
 import static org.apache.iceberg.SnapshotSummary.DELETED_RECORDS_PROP;
 import static org.apache.iceberg.SnapshotSummary.REMOVED_EQ_DELETES_PROP;
 import static org.apache.iceberg.SnapshotSummary.REMOVED_POS_DELETES_PROP;
@@ -471,7 +469,7 @@ public class IcebergMetadata
                 false,
                 Optional.empty(),
                 ImmutableSet.of(),
-                Optional.empty());
+                Optional.of(false));
     }
 
     private static long getSnapshotIdFromVersion(ConnectorSession session, Table table, ConnectorTableVersion version)
@@ -689,6 +687,12 @@ public class IcebergMetadata
     }
 
     @Override
+    public Map<SchemaTableName, RelationType> getRelationTypes(ConnectorSession session, Optional<String> schemaName)
+    {
+        return catalog.getRelationTypes(session, schemaName);
+    }
+
+    @Override
     public Map<String, ColumnHandle> getColumnHandles(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
         IcebergTableHandle table = checkValidTableHandle(tableHandle);
@@ -716,7 +720,7 @@ public class IcebergMetadata
     public void validateScan(ConnectorSession session, ConnectorTableHandle handle)
     {
         IcebergTableHandle table = (IcebergTableHandle) handle;
-        if (isQueryPartitionFilterRequired(session) && table.getEnforcedPredicate().isAll() && table.getAnalyzeColumns().isEmpty()) {
+        if (isQueryPartitionFilterRequired(session) && table.getEnforcedPredicate().isAll() && !table.getForAnalyze().orElseThrow()) {
             Schema schema = SchemaParser.fromJson(table.getTableSchemaJson());
             Optional<PartitionSpec> partitionSpec = table.getPartitionSpecJson()
                     .map(partitionSpecJson -> PartitionSpecParser.fromJson(schema, partitionSpecJson));
@@ -1500,13 +1504,6 @@ public class IcebergMetadata
             updateStatistics.removeStatistics(statisticsFile.snapshotId());
         }
         updateStatistics.commit();
-        UpdateProperties updateProperties = transaction.updateProperties();
-        for (String key : transaction.table().properties().keySet()) {
-            if (key.startsWith(TRINO_STATS_PREFIX)) {
-                updateProperties.remove(key);
-            }
-        }
-        updateProperties.commit();
         transaction.commitTransaction();
         transaction = null;
     }
@@ -1651,7 +1648,8 @@ public class IcebergMetadata
         metadataFileLocations(table, false).stream()
                 .map(IcebergUtil::fileName)
                 .forEach(validMetadataFileNames::add);
-        validMetadataFileNames.add(fileName(versionHintLocation(table)));
+
+        validMetadataFileNames.add("version-hint.text");
 
         scanAndDeleteInvalidFiles(table, session, schemaTableName, expiration, validDataFileNames.build(), "data");
         scanAndDeleteInvalidFiles(table, session, schemaTableName, expiration, validMetadataFileNames.build(), "metadata");
@@ -2114,7 +2112,7 @@ public class IcebergMetadata
                 });
 
         return new ConnectorAnalyzeMetadata(
-                handle.withAnalyzeColumns(analyzeColumnNames.or(() -> Optional.of(ImmutableSet.of()))),
+                handle.forAnalyze(),
                 getStatisticsCollectionMetadata(
                         tableMetadata,
                         analyzeColumnNames,
@@ -2174,40 +2172,11 @@ public class IcebergMetadata
                     "Unexpected computed statistics that cannot be attached to a snapshot because none exists: %s",
                     computedStatistics);
 
-            // TODO (https://github.com/trinodb/trino/issues/15397): remove support for Trino-specific statistics properties
-            // Drop all stats. Empty table needs none
-            UpdateProperties updateProperties = transaction.updateProperties();
-            table.properties().keySet().stream()
-                    .filter(key -> key.startsWith(TRINO_STATS_PREFIX))
-                    .forEach(updateProperties::remove);
-            updateProperties.commit();
-
             transaction.commitTransaction();
             transaction = null;
             return;
         }
         long snapshotId = handle.getSnapshotId().orElseThrow();
-
-        Set<Integer> columnIds = table.schema().columns().stream()
-                .map(Types.NestedField::fieldId)
-                .collect(toImmutableSet());
-
-        // TODO (https://github.com/trinodb/trino/issues/15397): remove support for Trino-specific statistics properties
-        // Drop stats for obsolete columns
-        UpdateProperties updateProperties = transaction.updateProperties();
-        table.properties().keySet().stream()
-                .filter(key -> {
-                    if (!key.startsWith(TRINO_STATS_PREFIX)) {
-                        return false;
-                    }
-                    Matcher matcher = TRINO_STATS_COLUMN_ID_PATTERN.matcher(key);
-                    if (!matcher.matches()) {
-                        return false;
-                    }
-                    return !columnIds.contains(Integer.parseInt(matcher.group("columnId")));
-                })
-                .forEach(updateProperties::remove);
-        updateProperties.commit();
 
         CollectedStatistics collectedStatistics = processComputedTableStatistics(table, computedStatistics);
         StatisticsFile statisticsFile = tableStatisticsWriter.writeStatisticsFile(
@@ -2499,7 +2468,7 @@ public class IcebergMetadata
                 table.isRecordScannedFiles(),
                 table.getMaxScannedFileSize(),
                 table.getConstraintColumns(),
-                table.getAnalyzeColumns());
+                table.getForAnalyze());
 
         return Optional.of(new LimitApplicationResult<>(table, false, false));
     }
@@ -2600,7 +2569,7 @@ public class IcebergMetadata
                         table.isRecordScannedFiles(),
                         table.getMaxScannedFileSize(),
                         Sets.union(table.getConstraintColumns(), newConstraintColumns),
-                        table.getAnalyzeColumns()),
+                        table.getForAnalyze()),
                 remainingConstraint.transformKeys(ColumnHandle.class::cast),
                 extractionResult.remainingExpression(),
                 false));
@@ -2747,10 +2716,10 @@ public class IcebergMetadata
                         originalHandle.getNameMappingJson(),
                         originalHandle.getTableLocation(),
                         originalHandle.getStorageProperties(),
-                        originalHandle.isRecordScannedFiles(),
+                        false, // recordScannedFiles does not affect stats
                         originalHandle.getMaxScannedFileSize(),
-                        originalHandle.getConstraintColumns(),
-                        originalHandle.getAnalyzeColumns()),
+                        ImmutableSet.of(), // constraintColumns do not affect stats
+                        Optional.empty()), // forAnalyze does not affect stats
                 handle -> {
                     Table icebergTable = catalog.loadTable(session, handle.getSchemaTableName());
                     return TableStatisticsReader.getTableStatistics(typeManager, session, handle, icebergTable);

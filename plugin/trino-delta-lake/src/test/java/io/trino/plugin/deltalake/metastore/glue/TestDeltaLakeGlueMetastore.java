@@ -113,11 +113,11 @@ public class TestDeltaLakeGlueMetastore
                 .put("delta.hide-non-delta-lake-tables", "true")
                 .buildOrThrow();
 
+        ConnectorContext context = new TestingConnectorContext();
         Bootstrap app = new Bootstrap(
                 // connector dependencies
                 new JsonModule(),
                 binder -> {
-                    ConnectorContext context = new TestingConnectorContext();
                     binder.bind(CatalogName.class).toInstance(new CatalogName("test"));
                     binder.bind(TypeManager.class).toInstance(context.getTypeManager());
                     binder.bind(NodeManager.class).toInstance(context.getNodeManager());
@@ -130,7 +130,7 @@ public class TestDeltaLakeGlueMetastore
                 new DeltaLakeMetastoreModule(),
                 new DeltaLakeModule(),
                 // test setup
-                new FileSystemModule());
+                new FileSystemModule("test", context.getNodeManager(), context.getOpenTelemetry()));
 
         Injector injector = app
                 .doNotInitializeLogging()
@@ -289,7 +289,7 @@ public class TestDeltaLakeGlueMetastore
                 .setTableName(tableName.getTableName())
                 .setOwner(Optional.of(session.getUser()))
                 .setTableType(EXTERNAL_TABLE.name())
-                .setDataColumns(List.of(new Column("a_column", HIVE_STRING, Optional.empty())));
+                .setDataColumns(List.of(new Column("a_column", HIVE_STRING, Optional.empty(), Map.of())));
 
         table.getStorageBuilder()
                 .setStorageFormat(fromHiveStorageFormat(PARQUET))
@@ -308,7 +308,7 @@ public class TestDeltaLakeGlueMetastore
                 .setTableName(viewName.getTableName())
                 .setOwner(Optional.of(session.getUser()))
                 .setTableType(VIRTUAL_VIEW.name())
-                .setDataColumns(List.of(new Column("a_column", HIVE_STRING, Optional.empty())));
+                .setDataColumns(List.of(new Column("a_column", HIVE_STRING, Optional.empty(), Map.of())));
 
         table.getStorageBuilder()
                 .setStorageFormat(fromHiveStorageFormat(PARQUET))

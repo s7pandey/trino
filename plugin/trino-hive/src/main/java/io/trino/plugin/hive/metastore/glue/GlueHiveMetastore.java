@@ -102,6 +102,7 @@ import io.trino.plugin.hive.metastore.glue.converter.GlueToTrinoConverter.GluePa
 import io.trino.plugin.hive.util.HiveUtil;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnNotFoundException;
+import io.trino.spi.connector.RelationType;
 import io.trino.spi.connector.SchemaNotFoundException;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
@@ -355,7 +356,7 @@ public class GlueHiveMetastore
             columnStatisticsProvider.updateTableColumnStatistics(table, updatedStatistics.getColumnStatistics());
         }
         catch (EntityNotFoundException e) {
-            throw new TableNotFoundException(new SchemaTableName(databaseName, tableName));
+            throw new TableNotFoundException(new SchemaTableName(databaseName, tableName), e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -435,6 +436,37 @@ public class GlueHiveMetastore
     }
 
     @Override
+    public Map<String, RelationType> getRelationTypes(String databaseName)
+    {
+        try {
+            return getGlueTables(databaseName)
+                    .filter(tableFilter.or(SOME_KIND_OF_VIEW_FILTER))
+                    .collect(toImmutableMap(
+                            com.amazonaws.services.glue.model.Table::getName,
+                            table -> {
+                                // GlueHiveMetastore currently does not distinguish views and materialized views, see getAllViews().
+                                if (SOME_KIND_OF_VIEW_FILTER.test(table)) {
+                                    return RelationType.VIEW;
+                                }
+                                return RelationType.TABLE;
+                            }));
+        }
+        catch (EntityNotFoundException | AccessDeniedException e) {
+            // database does not exist or permission denied
+            return ImmutableMap.of();
+        }
+        catch (AmazonServiceException e) {
+            throw new TrinoException(HIVE_METASTORE_ERROR, e);
+        }
+    }
+
+    @Override
+    public Optional<Map<SchemaTableName, RelationType>> getRelationTypes()
+    {
+        return Optional.empty();
+    }
+
+    @Override
     public List<String> getTablesWithParameter(String databaseName, String parameterKey, String parameterValue)
     {
         return getTableNames(databaseName, table -> parameterValue.equals(getTableParameters(table).get(parameterKey)));
@@ -487,7 +519,7 @@ public class GlueHiveMetastore
                     glueClient.createDatabase(new CreateDatabaseRequest().withDatabaseInput(databaseInput)));
         }
         catch (AlreadyExistsException e) {
-            throw new SchemaAlreadyExistsException(database.getDatabaseName());
+            throw new SchemaAlreadyExistsException(database.getDatabaseName(), e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -519,7 +551,7 @@ public class GlueHiveMetastore
                     glueClient.deleteDatabase(new DeleteDatabaseRequest().withName(databaseName)));
         }
         catch (EntityNotFoundException e) {
-            throw new SchemaNotFoundException(databaseName);
+            throw new SchemaNotFoundException(databaseName, e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -563,10 +595,10 @@ public class GlueHiveMetastore
                             .withTableInput(input)));
         }
         catch (AlreadyExistsException e) {
-            throw new TableAlreadyExistsException(new SchemaTableName(table.getDatabaseName(), table.getTableName()));
+            throw new TableAlreadyExistsException(new SchemaTableName(table.getDatabaseName(), table.getTableName()), e);
         }
         catch (EntityNotFoundException e) {
-            throw new SchemaNotFoundException(table.getDatabaseName());
+            throw new SchemaNotFoundException(table.getDatabaseName(), e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -626,7 +658,7 @@ public class GlueHiveMetastore
                             .withTableInput(newTableInput)));
         }
         catch (EntityNotFoundException e) {
-            throw new TableNotFoundException(new SchemaTableName(databaseName, tableName));
+            throw new TableNotFoundException(new SchemaTableName(databaseName, tableName), e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -711,7 +743,7 @@ public class GlueHiveMetastore
                             .withTableInput(newTableInput)));
         }
         catch (EntityNotFoundException e) {
-            throw new TableNotFoundException(new SchemaTableName(databaseName, tableName));
+            throw new TableNotFoundException(new SchemaTableName(databaseName, tableName), e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -778,7 +810,7 @@ public class GlueHiveMetastore
     {
         Table oldTable = getExistingTable(databaseName, tableName);
         Table newTable = Table.builder(oldTable)
-                .addDataColumn(new Column(columnName, columnType, Optional.ofNullable(columnComment)))
+                .addDataColumn(new Column(columnName, columnType, Optional.ofNullable(columnComment), ImmutableMap.of()))
                 .build();
         replaceTable(databaseName, tableName, newTable, null);
     }
@@ -794,7 +826,7 @@ public class GlueHiveMetastore
         ImmutableList.Builder<Column> newDataColumns = ImmutableList.builder();
         for (Column column : oldTable.getDataColumns()) {
             if (column.getName().equals(oldColumnName)) {
-                newDataColumns.add(new Column(newColumnName, column.getType(), column.getComment()));
+                newDataColumns.add(new Column(newColumnName, column.getType(), column.getComment(), column.getProperties()));
             }
             else {
                 newDataColumns.add(column);
@@ -1126,7 +1158,7 @@ public class GlueHiveMetastore
                     partition.getStatistics().getColumnStatistics());
         }
         catch (EntityNotFoundException e) {
-            throw new PartitionNotFoundException(new SchemaTableName(databaseName, tableName), partition.getPartition().getValues());
+            throw new PartitionNotFoundException(new SchemaTableName(databaseName, tableName), partition.getPartition().getValues(), e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -1264,10 +1296,10 @@ public class GlueHiveMetastore
                             .withFunctionInput(functionInput)));
         }
         catch (AlreadyExistsException e) {
-            throw new TrinoException(ALREADY_EXISTS, "Function already exists");
+            throw new TrinoException(ALREADY_EXISTS, "Function already exists", e);
         }
         catch (EntityNotFoundException e) {
-            throw new SchemaNotFoundException(databaseName);
+            throw new SchemaNotFoundException(databaseName, e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);
@@ -1300,7 +1332,7 @@ public class GlueHiveMetastore
                             .withFunctionName(metastoreFunctionName(functionName, signatureToken))));
         }
         catch (EntityNotFoundException e) {
-            throw new TrinoException(FUNCTION_NOT_FOUND, "Function not found");
+            throw new TrinoException(FUNCTION_NOT_FOUND, "Function not found", e);
         }
         catch (AmazonServiceException e) {
             throw new TrinoException(HIVE_METASTORE_ERROR, e);

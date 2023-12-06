@@ -16,17 +16,16 @@ package io.trino.plugin.bigquery;
 import io.airlift.units.Duration;
 import io.trino.Session;
 import io.trino.spi.QueryId;
+import io.trino.sql.planner.plan.FilterNode;
 import io.trino.testing.BaseConnectorTest;
 import io.trino.testing.MaterializedResult;
 import io.trino.testing.MaterializedResultWithQueryId;
 import io.trino.testing.TestingConnectorBehavior;
 import io.trino.testing.sql.TestTable;
 import org.intellij.lang.annotations.Language;
-import org.testng.SkipException;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Parameters;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.util.List;
 import java.util.Optional;
@@ -45,22 +44,22 @@ import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
+import static org.junit.jupiter.api.Assumptions.abort;
+import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
 
+@TestInstance(PER_CLASS)
 public abstract class BaseBigQueryConnectorTest
         extends BaseConnectorTest
 {
     protected BigQuerySqlExecutor bigQuerySqlExecutor;
     private String gcpStorageBucket;
 
-    @BeforeClass(alwaysRun = true)
-    @Parameters("testing.gcp-storage-bucket")
-    public void initBigQueryExecutor(String gcpStorageBucket)
+    @BeforeAll
+    public void initBigQueryExecutor()
     {
         this.bigQuerySqlExecutor = new BigQuerySqlExecutor();
         // Prerequisite: upload region.csv in resources directory to gs://{testing.gcp-storage-bucket}/tpch/tiny/region.csv
-        this.gcpStorageBucket = gcpStorageBucket;
+        this.gcpStorageBucket = System.getProperty("testing.gcp-storage-bucket");
     }
 
     @Override
@@ -87,7 +86,7 @@ public abstract class BaseBigQueryConnectorTest
     }
 
     @Override
-    @org.junit.jupiter.api.Test
+    @Test
     public void testShowColumns()
     {
         assertThat(query("SHOW COLUMNS FROM orders")).matches(getDescribeOrdersResult());
@@ -110,56 +109,90 @@ public abstract class BaseBigQueryConnectorTest
                 .build();
     }
 
-    @Test(dataProvider = "createTableSupportedTypes")
-    public void testCreateTableSupportedType(String createType, String expectedType)
+    @Test
+    @Override // Override because the regexp is different from the base test
+    public void testPredicateReflectedInExplain()
     {
-        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_create_table_supported_type_" + createType.replaceAll("[^a-zA-Z0-9]", ""), format("(col1 %s)", createType))) {
-            assertEquals(
-                    computeScalar("SELECT data_type FROM information_schema.columns WHERE table_name = '" + table.getName() + "' AND column_name = 'col1'"),
-                    expectedType);
+        assertExplain(
+                "EXPLAIN SELECT name FROM nation WHERE nationkey = 42",
+                "nationkey", "bigint", "42");
+    }
+
+    @Test
+    public void testPredicatePushdown()
+    {
+        testPredicatePushdown("true", "true", true);
+        testPredicatePushdown("CAST(1 AS INT64)", "1", true);
+        testPredicatePushdown("CAST(0.1 AS FLOAT64)", "0.1", true);
+        testPredicatePushdown("NUMERIC '123'", "123", true);
+        testPredicatePushdown("'string'", "'string'", true);
+        testPredicatePushdown("b''", "x''", true);
+        testPredicatePushdown("DATE '2017-01-01'", "DATE '2017-01-01'", true);
+        testPredicatePushdown("TIME '12:34:56'", "TIME '12:34:56'", true);
+        testPredicatePushdown("TIMESTAMP '2018-04-01 02:13:55.123456 UTC'", "TIMESTAMP '2018-04-01 02:13:55.123456 UTC'", true);
+        testPredicatePushdown("DATETIME '2018-04-01 02:13:55.123'", "TIMESTAMP '2018-04-01 02:13:55.123'", true);
+
+        testPredicatePushdown("ST_GeogPoint(0, 0)", "'POINT(0 0)'", false);
+        testPredicatePushdown("JSON '{\"age\": 30}'", "JSON '{\"age\": 30}'", false);
+        testPredicatePushdown("[true]", "ARRAY[true]", false);
+        testPredicatePushdown("STRUCT('nested' AS x)", "ROW('nested')", false);
+    }
+
+    private void testPredicatePushdown(@Language("SQL") String inputLiteral, @Language("SQL") String predicateLiteral, boolean isPushdownSupported)
+    {
+        try (TestTable table = new TestTable(bigQuerySqlExecutor, "test.test_predicate_pushdown", "AS SELECT %s col".formatted(inputLiteral))) {
+            String query = "SELECT * FROM " + table.getName() + " WHERE col = " + predicateLiteral;
+            if (isPushdownSupported) {
+                assertThat(query(query)).isFullyPushedDown();
+            }
+            else {
+                assertThat(query(query)).isNotFullyPushedDown(FilterNode.class);
+            }
         }
     }
 
-    @DataProvider
-    public Object[][] createTableSupportedTypes()
+    @Test
+    public void testCreateTableSupportedType()
     {
-        return new Object[][] {
-                {"boolean", "boolean"},
-                {"tinyint", "bigint"},
-                {"smallint", "bigint"},
-                {"integer", "bigint"},
-                {"bigint", "bigint"},
-                {"double", "double"},
-                {"decimal", "decimal(38,9)"},
-                {"date", "date"},
-                {"time with time zone", "time(6)"},
-                {"timestamp(6)", "timestamp(6)"},
-                {"timestamp(6) with time zone", "timestamp(6) with time zone"},
-                {"varchar", "varchar"},
-                {"varchar(65535)", "varchar"},
-                {"varbinary", "varbinary"},
-                {"array(bigint)", "array(bigint)"},
-                {"row(x bigint, y double)", "row(x bigint, y double)"},
-                {"row(x array(bigint))", "row(x array(bigint))"},
-        };
+        testCreateTableSupportedType("boolean", "boolean");
+        testCreateTableSupportedType("tinyint", "bigint");
+        testCreateTableSupportedType("smallint", "bigint");
+        testCreateTableSupportedType("integer", "bigint");
+        testCreateTableSupportedType("bigint", "bigint");
+        testCreateTableSupportedType("double", "double");
+        testCreateTableSupportedType("decimal", "decimal(38,9)");
+        testCreateTableSupportedType("date", "date");
+        testCreateTableSupportedType("time with time zone", "time(6)");
+        testCreateTableSupportedType("timestamp(6)", "timestamp(6)");
+        testCreateTableSupportedType("timestamp(6) with time zone", "timestamp(6) with time zone");
+        testCreateTableSupportedType("varchar", "varchar");
+        testCreateTableSupportedType("varchar(65535)", "varchar");
+        testCreateTableSupportedType("varbinary", "varbinary");
+        testCreateTableSupportedType("array(bigint)", "array(bigint)");
+        testCreateTableSupportedType("row(x bigint, y double)", "row(x bigint, y double)");
+        testCreateTableSupportedType("row(x array(bigint))", "row(x array(bigint))");
     }
 
-    @Test(dataProvider = "createTableUnsupportedTypes")
-    public void testCreateTableUnsupportedType(String createType)
+    private void testCreateTableSupportedType(String createType, String expectedType)
+    {
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_create_table_supported_type_" + createType.replaceAll("[^a-zA-Z0-9]", ""), format("(col1 %s)", createType))) {
+            assertThat(computeScalar("SELECT data_type FROM information_schema.columns WHERE table_name = '" + table.getName() + "' AND column_name = 'col1'")).isEqualTo(expectedType);
+        }
+    }
+
+    @Test
+    public void testCreateTableUnsupportedType()
+    {
+        testCreateTableUnsupportedType("json");
+        testCreateTableUnsupportedType("uuid");
+        testCreateTableUnsupportedType("ipaddress");
+    }
+
+    private void testCreateTableUnsupportedType(String createType)
     {
         String tableName = format("test_create_table_unsupported_type_%s_%s", createType.replaceAll("[^a-zA-Z0-9]", ""), randomNameSuffix());
         assertQueryFails(format("CREATE TABLE %s (col1 %s)", tableName, createType), "Unsupported column type: " + createType);
         assertUpdate("DROP TABLE IF EXISTS " + tableName);
-    }
-
-    @DataProvider
-    public Object[][] createTableUnsupportedTypes()
-    {
-        return new Object[][] {
-                {"json"},
-                {"uuid"},
-                {"ipaddress"},
-        };
     }
 
     @Test
@@ -178,14 +211,6 @@ public abstract class BaseBigQueryConnectorTest
             assertQueryFails(
                     "CREATE TABLE " + table.getName() + "(col1 int)",
                     "\\Qline 1:1: Table 'bigquery.tpch." + table.getName() + "' already exists\\E");
-        }
-    }
-
-    @Test
-    public void testCreateTableIfNotExists()
-    {
-        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_create_table_if_not_exists", "(col1 int)")) {
-            assertUpdate("CREATE TABLE IF NOT EXISTS " + table.getName() + "(col1 int)");
         }
     }
 
@@ -281,6 +306,7 @@ public abstract class BaseBigQueryConnectorTest
         return Optional.of(dataMappingTestSetup);
     }
 
+    @Test
     @Override
     public void testNoDataSystemTable()
     {
@@ -292,7 +318,7 @@ public abstract class BaseBigQueryConnectorTest
                         "to match regex:\n" +
                         "  \"line 1:1: Table '\\w+.\\w+.\"nation\\$data\"' does not exist\"\n" +
                         "but did not.");
-        throw new SkipException("TODO");
+        abort("TODO");
     }
 
     @Override
@@ -301,6 +327,7 @@ public abstract class BaseBigQueryConnectorTest
         return nullToEmpty(exception.getMessage()).matches(".*Invalid field name \"%s\". Fields must contain the allowed characters, and be at most 300 characters long..*".formatted(columnName.replace("\\", "\\\\")));
     }
 
+    @Test
     @Override // Override because the base test exceeds rate limits per a table
     public void testCommentColumn()
     {
@@ -433,7 +460,7 @@ public abstract class BaseBigQueryConnectorTest
         }
     }
 
-    @Test(description = "regression test for https://github.com/trinodb/trino/issues/7784")
+    @Test // regression test for https://github.com/trinodb/trino/issues/7784"
     public void testSelectWithSingleQuoteInWhereClause()
     {
         try (TestTable table = new TestTable(
@@ -445,7 +472,7 @@ public abstract class BaseBigQueryConnectorTest
         }
     }
 
-    @Test(description = "regression test for https://github.com/trinodb/trino/issues/5618")
+    @Test // "regression test for https://github.com/trinodb/trino/issues/5618"
     public void testPredicatePushdownPrunnedColumns()
     {
         try (TestTable table = new TestTable(
@@ -516,9 +543,7 @@ public abstract class BaseBigQueryConnectorTest
         onBigQuery(format("CREATE TABLE %s.%s (a INT64, b INT64, c INT64)", schemaName, tableName));
         onBigQuery(format("CREATE VIEW %s.%s AS SELECT * FROM %s.%s", schemaName, viewName, schemaName, tableName));
 
-        assertEquals(
-                computeScalar(format("SELECT * FROM %s.\"%s$view_definition\"", schemaName, viewName)),
-                format("SELECT * FROM %s.%s", schemaName, tableName));
+        assertThat(computeScalar(format("SELECT * FROM %s.\"%s$view_definition\"", schemaName, viewName))).isEqualTo(format("SELECT * FROM %s.%s", schemaName, tableName));
 
         assertQueryFails(
                 format("SELECT * FROM %s.\"%s$view_definition\"", schemaName, tableName),
@@ -528,6 +553,7 @@ public abstract class BaseBigQueryConnectorTest
         onBigQuery(format("DROP VIEW %s.%s", schemaName, viewName));
     }
 
+    @Test
     @Override
     public void testShowCreateTable()
     {
@@ -543,13 +569,6 @@ public abstract class BaseBigQueryConnectorTest
                         "   shippriority bigint NOT NULL,\n" +
                         "   comment varchar NOT NULL\n" +
                         ")");
-    }
-
-    @Override
-    public void testReadMetadataWithRelationsConcurrentModifications()
-    {
-        // TODO: Enable this test after fixing "Task did not completed before timeout" (https://github.com/trinodb/trino/issues/14230)
-        throw new SkipException("Test fails with a timeout sometimes and is flaky");
     }
 
     @Test
@@ -909,17 +928,17 @@ public abstract class BaseBigQueryConnectorTest
     public void testNativeQueryCreateStatement()
     {
         String tableName = "test_create" + randomNameSuffix();
-        assertFalse(getQueryRunner().tableExists(getSession(), tableName));
+        assertThat(getQueryRunner().tableExists(getSession(), tableName)).isFalse();
         assertThatThrownBy(() -> query("SELECT * FROM TABLE(bigquery.system.query(query => 'CREATE TABLE test." + tableName + "(n INTEGER)'))"))
                 .hasMessage("Unsupported statement type: CREATE_TABLE");
-        assertFalse(getQueryRunner().tableExists(getSession(), tableName));
+        assertThat(getQueryRunner().tableExists(getSession(), tableName)).isFalse();
     }
 
     @Test
     public void testNativeQueryInsertStatementTableDoesNotExist()
     {
         String tableName = "test_insert" + randomNameSuffix();
-        assertFalse(getQueryRunner().tableExists(getSession(), tableName));
+        assertThat(getQueryRunner().tableExists(getSession(), tableName)).isFalse();
         assertThatThrownBy(() -> query("SELECT * FROM TABLE(bigquery.system.query(query => 'INSERT INTO test." + tableName + " VALUES (1)'))"))
                 .hasMessageContaining("Failed to get schema for query")
                 .hasStackTraceContaining("%s was not found", tableName);
@@ -946,6 +965,7 @@ public abstract class BaseBigQueryConnectorTest
                 .hasMessageContaining("Failed to get schema for query");
     }
 
+    @Test
     @Override
     public void testInsertArray()
     {
@@ -956,23 +976,24 @@ public abstract class BaseBigQueryConnectorTest
         }
     }
 
+    @Test
     @Override
     public void testInsertRowConcurrently()
     {
         // TODO https://github.com/trinodb/trino/issues/15158 Enable this test after switching to storage write API
-        throw new SkipException("Test fails with a timeout sometimes and is flaky");
+        abort("Test fails with a timeout sometimes and is flaky");
     }
 
     @Override
     protected String errorMessageForCreateTableAsSelectNegativeDate(String date)
     {
-        return format(".*Invalid date: '%s'.*", date);
+        return "BigQuery supports dates between 0001-01-01 and 9999-12-31 but got " + date;
     }
 
     @Override
     protected String errorMessageForInsertNegativeDate(String date)
     {
-        return format(".*Invalid date: '%s'.*", date);
+        return "BigQuery supports dates between 0001-01-01 and 9999-12-31 but got " + date;
     }
 
     @Override
@@ -988,6 +1009,7 @@ public abstract class BaseBigQueryConnectorTest
                         "col_required2 INT64 NOT NULL)");
     }
 
+    @Test
     @Override
     public void testCharVarcharComparison()
     {

@@ -152,6 +152,8 @@ import static io.trino.plugin.hive.HiveTestUtils.SESSION;
 import static io.trino.plugin.hive.HiveTestUtils.getHiveSession;
 import static io.trino.plugin.hive.HiveTestUtils.mapType;
 import static io.trino.plugin.hive.acid.AcidTransaction.NO_ACID_TRANSACTION;
+import static io.trino.plugin.hive.util.SerdeConstants.LIST_COLUMNS;
+import static io.trino.plugin.hive.util.SerdeConstants.LIST_COLUMN_TYPES;
 import static io.trino.plugin.hive.util.SerdeConstants.SERIALIZATION_LIB;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
@@ -209,10 +211,9 @@ import static org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveO
 import static org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory.javaStringObjectInspector;
 import static org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory.javaTimestampObjectInspector;
 import static org.apache.hadoop.io.SequenceFile.CompressionType.BLOCK;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.joda.time.DateTimeZone.UTC;
 import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertTrue;
 
 // Failing on multiple threads because of org.apache.hadoop.hive.ql.io.parquet.write.ParquetRecordWriterWrapper
 // uses a single record writer across all threads.
@@ -243,9 +244,9 @@ public final class TestHiveFileFormats
     public void setUp()
     {
         // ensure the expected timezone is configured for this VM
-        assertEquals(TimeZone.getDefault().getID(),
-                "America/Bahia_Banderas",
-                "Timezone not configured correctly. Add -Duser.timezone=America/Bahia_Banderas to your JVM arguments");
+        assertThat(TimeZone.getDefault().getID())
+                .describedAs("Timezone not configured correctly. Add -Duser.timezone=America/Bahia_Banderas to your JVM arguments")
+                .isEqualTo("America/Bahia_Banderas");
     }
 
     @Test(dataProvider = "validRowAndFileSizePadding")
@@ -291,7 +292,7 @@ public final class TestHiveFileFormats
                 .filter(column -> column.partitionKey() || (column.type() instanceof VarcharType varcharType && varcharType.isUnbounded() && !column.name().contains("_null_")))
                 .collect(toImmutableList());
 
-        assertTrue(testColumns.size() > 5);
+        assertThat(testColumns.size() > 5).isTrue();
 
         assertThatFileFormat(CSV)
                 .withColumns(testColumns)
@@ -938,10 +939,6 @@ public final class TestHiveFileFormats
             int rowCount)
             throws IOException
     {
-        Properties splitProperties = new Properties();
-        splitProperties.setProperty(FILE_INPUT_FORMAT, storageFormat.getInputFormat());
-        splitProperties.setProperty(SERIALIZATION_LIB, storageFormat.getSerde());
-
         // Use full columns in split properties
         ImmutableList.Builder<String> splitPropertiesColumnNames = ImmutableList.builder();
         ImmutableList.Builder<String> splitPropertiesColumnTypes = ImmutableList.builder();
@@ -956,8 +953,12 @@ public final class TestHiveFileFormats
             }
         }
 
-        splitProperties.setProperty("columns", String.join(",", splitPropertiesColumnNames.build()));
-        splitProperties.setProperty("columns.types", String.join(",", splitPropertiesColumnTypes.build()));
+        Map<String, String> splitProperties = ImmutableMap.<String, String>builder()
+                .put(FILE_INPUT_FORMAT, storageFormat.getInputFormat())
+                .put(SERIALIZATION_LIB, storageFormat.getSerde())
+                .put(LIST_COLUMNS, String.join(",", splitPropertiesColumnNames.build()))
+                .put(LIST_COLUMN_TYPES, String.join(",", splitPropertiesColumnTypes.build()))
+                .buildOrThrow();
 
         List<HivePartitionKey> partitionKeys = testReadColumns.stream()
                 .filter(TestColumn::partitionKey)
@@ -1025,7 +1026,7 @@ public final class TestHiveFileFormats
     {
         try (pageSource) {
             MaterializedResult result = materializeSourceDataStream(SESSION, pageSource, testColumns.stream().map(TestColumn::type).collect(toImmutableList()));
-            assertEquals(result.getMaterializedRows().size(), rowCount);
+            assertThat(result.getMaterializedRows().size()).isEqualTo(rowCount);
             for (MaterializedRow row : result) {
                 for (int i = 0, testColumnsSize = testColumns.size(); i < testColumnsSize; i++) {
                     TestColumn testColumn = testColumns.get(i);
@@ -1039,7 +1040,9 @@ public final class TestHiveFileFormats
                     }
 
                     if (actualValue == null || expectedValue == null) {
-                        assertEquals(actualValue, expectedValue, "Wrong value for column " + testColumn.name());
+                        assertThat(actualValue)
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(expectedValue);
                     }
                     else if (type == REAL) {
                         assertEquals((float) actualValue, (float) expectedValue, EPSILON, "Wrong value for column " + testColumn.name());
@@ -1049,33 +1052,47 @@ public final class TestHiveFileFormats
                     }
                     else if (type == DATE) {
                         SqlDate expectedDate = new SqlDate(toIntExact((long) expectedValue));
-                        assertEquals(actualValue, expectedDate, "Wrong value for column " + testColumn.name());
+                        assertThat(actualValue)
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(expectedDate);
                     }
                     else if (type == BIGINT || type == INTEGER || type == SMALLINT || type == TINYINT || type == BOOLEAN) {
-                        assertEquals(actualValue, expectedValue);
+                        assertThat(actualValue).isEqualTo(expectedValue);
                     }
                     else if (type instanceof TimestampType timestampType && timestampType.getPrecision() == 3) {
                         // the expected value is in micros to simplify the array, map, and row types
                         SqlTimestamp expectedTimestamp = sqlTimestampOf(3, floorDiv((long) expectedValue, MICROSECONDS_PER_MILLISECOND));
-                        assertEquals(actualValue, expectedTimestamp, "Wrong value for column " + testColumn.name());
+                        assertThat(actualValue)
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(expectedTimestamp);
                     }
                     else if (type instanceof CharType) {
-                        assertEquals(actualValue, padSpaces((String) expectedValue, (CharType) type), "Wrong value for column " + testColumn.name());
+                        assertThat(actualValue)
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(padSpaces((String) expectedValue, (CharType) type));
                     }
                     else if (type instanceof VarcharType) {
-                        assertEquals(actualValue, expectedValue, "Wrong value for column " + testColumn.name());
+                        assertThat(actualValue)
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(expectedValue);
                     }
                     else if (type == VARBINARY) {
-                        assertEquals(new String(((SqlVarbinary) actualValue).getBytes(), UTF_8), expectedValue, "Wrong value for column " + testColumn.name());
+                        assertThat(new String(((SqlVarbinary) actualValue).getBytes(), UTF_8))
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(expectedValue);
                     }
                     else if (type instanceof DecimalType) {
-                        assertEquals(new BigDecimal(actualValue.toString()), expectedValue, "Wrong value for column " + testColumn.name());
+                        assertThat(new BigDecimal(actualValue.toString()))
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(expectedValue);
                     }
                     else {
                         BlockBuilder builder = type.createBlockBuilder(null, 1);
                         type.writeObject(builder, expectedValue);
                         expectedValue = type.getObjectValue(SESSION, builder.build(), 0);
-                        assertEquals(actualValue, expectedValue, "Wrong value for column " + testColumn.name());
+                        assertThat(actualValue)
+                                .describedAs("Wrong value for column " + testColumn.name())
+                                .isEqualTo(expectedValue);
                     }
                 }
             }
@@ -1247,11 +1264,21 @@ public final class TestHiveFileFormats
         private void assertRead(HivePageSourceFactory pageSourceFactory)
                 throws Exception
         {
-            assertNotNull(storageFormat, "storageFormat must be specified");
-            assertNotNull(writeColumns, "writeColumns must be specified");
-            assertNotNull(readColumns, "readColumns must be specified");
-            assertNotNull(session, "session must be specified");
-            assertTrue(rowsCount >= 0, "rowsCount must be non-negative");
+            assertThat(storageFormat)
+                    .describedAs("storageFormat must be specified")
+                    .isNotNull();
+            assertThat(writeColumns)
+                    .describedAs("writeColumns must be specified")
+                    .isNotNull();
+            assertThat(readColumns)
+                    .describedAs("readColumns must be specified")
+                    .isNotNull();
+            assertThat(session)
+                    .describedAs("session must be specified")
+                    .isNotNull();
+            assertThat(rowsCount >= 0)
+                    .describedAs("rowsCount must be non-negative")
+                    .isTrue();
 
             String compressionSuffix = compressionCodec.getHiveCompressionKind()
                     .map(CompressionKind::getFileExtension)
@@ -1317,20 +1344,10 @@ public final class TestHiveFileFormats
         }
         Page page = pageBuilder.build();
 
-        Properties tableProperties = new Properties();
-        tableProperties.setProperty(
-                "columns",
-                testColumns.stream()
-                        .map(TestColumn::name)
-                        .collect(Collectors.joining(",")));
-
-        tableProperties.setProperty(
-                "columns.types",
-                testColumns.stream()
-                        .map(TestColumn::type)
-                        .map(HiveType::toHiveType)
-                        .map(HiveType::toString)
-                        .collect(Collectors.joining(",")));
+        Map<String, String> tableProperties = ImmutableMap.<String, String>builder()
+                .put(LIST_COLUMNS, testColumns.stream().map(TestColumn::name).collect(Collectors.joining(",")))
+                .put(LIST_COLUMN_TYPES, testColumns.stream().map(TestColumn::type).map(HiveType::toHiveType).map(HiveType::toString).collect(Collectors.joining(",")))
+                .buildOrThrow();
 
         Optional<FileWriter> fileWriter = fileWriterFactory.createFileWriter(
                 location,
@@ -1470,8 +1487,8 @@ public final class TestHiveFileFormats
                 .collect(toImmutableList());
 
         Properties tableProperties = new Properties();
-        tableProperties.setProperty("columns", testColumns.stream().map(TestColumn::name).collect(Collectors.joining(",")));
-        tableProperties.setProperty("columns.types", testColumns.stream().map(testColumn -> HiveType.toHiveType(testColumn.type()).toString()).collect(Collectors.joining(",")));
+        tableProperties.setProperty(LIST_COLUMNS, testColumns.stream().map(TestColumn::name).collect(Collectors.joining(",")));
+        tableProperties.setProperty(LIST_COLUMN_TYPES, testColumns.stream().map(testColumn -> HiveType.toHiveType(testColumn.type()).toString()).collect(Collectors.joining(",")));
         serializer.initialize(new Configuration(false), tableProperties);
 
         JobConf jobConf = new JobConf(false);

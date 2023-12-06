@@ -16,6 +16,7 @@ package io.trino.plugin.hive;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.io.Resources;
 import io.airlift.stats.CounterStat;
@@ -64,7 +65,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -82,6 +82,7 @@ import static io.airlift.slice.Slices.utf8Slice;
 import static io.airlift.units.DataSize.Unit.GIGABYTE;
 import static io.airlift.units.DataSize.Unit.KILOBYTE;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
+import static io.trino.hive.thrift.metastore.hive_metastoreConstants.FILE_INPUT_FORMAT;
 import static io.trino.plugin.hive.BackgroundHiveSplitLoader.BucketSplitInfo.createBucketSplitInfo;
 import static io.trino.plugin.hive.BackgroundHiveSplitLoader.getBucketNumber;
 import static io.trino.plugin.hive.BackgroundHiveSplitLoader.hasAttemptId;
@@ -91,6 +92,7 @@ import static io.trino.plugin.hive.HiveErrorCode.HIVE_INVALID_BUCKET_FILES;
 import static io.trino.plugin.hive.HiveStorageFormat.AVRO;
 import static io.trino.plugin.hive.HiveStorageFormat.CSV;
 import static io.trino.plugin.hive.HiveStorageFormat.ORC;
+import static io.trino.plugin.hive.HiveTableProperties.TRANSACTIONAL;
 import static io.trino.plugin.hive.HiveTestUtils.SESSION;
 import static io.trino.plugin.hive.HiveTestUtils.getHiveSession;
 import static io.trino.plugin.hive.HiveTimestampPrecision.DEFAULT_PRECISION;
@@ -100,6 +102,8 @@ import static io.trino.plugin.hive.TableType.MANAGED_TABLE;
 import static io.trino.plugin.hive.util.HiveBucketing.BucketingVersion.BUCKETING_V1;
 import static io.trino.plugin.hive.util.HiveClassNames.SYMLINK_TEXT_INPUT_FORMAT_CLASS;
 import static io.trino.plugin.hive.util.HiveUtil.getRegularColumnHandles;
+import static io.trino.plugin.hive.util.SerdeConstants.FOOTER_COUNT;
+import static io.trino.plugin.hive.util.SerdeConstants.HEADER_COUNT;
 import static io.trino.plugin.hive.util.SerdeConstants.SERIALIZATION_LIB;
 import static io.trino.spi.predicate.TupleDomain.withColumnDomains;
 import static io.trino.spi.type.IntegerType.INTEGER;
@@ -110,14 +114,10 @@ import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.Executors.newCachedThreadPool;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
 import static org.junit.jupiter.api.parallel.ExecutionMode.CONCURRENT;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertTrue;
 
 @TestInstance(PER_CLASS)
 @Execution(CONCURRENT)
@@ -156,7 +156,7 @@ public class TestBackgroundHiveSplitLoader
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
 
-        assertEquals(drain(hiveSplitSource).size(), 2);
+        assertThat(drain(hiveSplitSource).size()).isEqualTo(2);
     }
 
     @Test
@@ -165,10 +165,10 @@ public class TestBackgroundHiveSplitLoader
     {
         FileEntry file = new FileEntry(LOCATION, DataSize.of(2, GIGABYTE).toBytes(), Instant.now(), Optional.empty());
         assertCsvSplitCount(file, Map.of(), 33);
-        assertCsvSplitCount(file, Map.of("skip.header.line.count", "1"), 33);
-        assertCsvSplitCount(file, Map.of("skip.header.line.count", "2"), 1);
-        assertCsvSplitCount(file, Map.of("skip.footer.line.count", "1"), 1);
-        assertCsvSplitCount(file, Map.of("skip.header.line.count", "1", "skip.footer.line.count", "1"), 1);
+        assertCsvSplitCount(file, Map.of(HEADER_COUNT, "1"), 33);
+        assertCsvSplitCount(file, Map.of(HEADER_COUNT, "2"), 1);
+        assertCsvSplitCount(file, Map.of(FOOTER_COUNT, "1"), 1);
+        assertCsvSplitCount(file, Map.of(HEADER_COUNT, "1", FOOTER_COUNT, "1"), 1);
     }
 
     private void assertCsvSplitCount(FileEntry file, Map<String, String> tableProperties, int expectedSplitCount)
@@ -193,7 +193,7 @@ public class TestBackgroundHiveSplitLoader
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
 
-        assertEquals(drainSplits(hiveSplitSource).size(), expectedSplitCount);
+        assertThat(drainSplits(hiveSplitSource).size()).isEqualTo(expectedSplitCount);
     }
 
     @Test
@@ -207,8 +207,8 @@ public class TestBackgroundHiveSplitLoader
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
         List<String> paths = drain(hiveSplitSource);
-        assertEquals(paths.size(), 1);
-        assertEquals(paths.get(0), LOCATION.toString());
+        assertThat(paths.size()).isEqualTo(1);
+        assertThat(paths.get(0)).isEqualTo(LOCATION.toString());
     }
 
     @Test
@@ -225,8 +225,8 @@ public class TestBackgroundHiveSplitLoader
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
         List<String> paths = drain(hiveSplitSource);
-        assertEquals(paths.size(), 1);
-        assertEquals(paths.get(0), LOCATION.toString());
+        assertThat(paths.size()).isEqualTo(1);
+        assertThat(paths.get(0)).isEqualTo(LOCATION.toString());
     }
 
     @Test
@@ -249,8 +249,8 @@ public class TestBackgroundHiveSplitLoader
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
         List<String> paths = drain(hiveSplitSource);
-        assertEquals(paths.size(), 1);
-        assertEquals(paths.get(0), LOCATION.toString());
+        assertThat(paths.size()).isEqualTo(1);
+        assertThat(paths.get(0)).isEqualTo(LOCATION.toString());
     }
 
     @Test
@@ -273,7 +273,7 @@ public class TestBackgroundHiveSplitLoader
         backgroundHiveSplitLoader.start(hiveSplitSource);
 
         List<HiveSplit> splits = drainSplits(hiveSplitSource);
-        assertEquals(splits.size(), 0);
+        assertThat(splits.size()).isEqualTo(0);
     }
 
     @Test
@@ -341,8 +341,8 @@ public class TestBackgroundHiveSplitLoader
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
 
-        assertEquals(drain(hiveSplitSource).size(), 2);
-        assertTrue(hiveSplitSource.isFinished());
+        assertThat(drain(hiveSplitSource).size()).isEqualTo(2);
+        assertThat(hiveSplitSource.isFinished()).isTrue();
     }
 
     @Test
@@ -350,7 +350,7 @@ public class TestBackgroundHiveSplitLoader
             throws Exception
     {
         CachingDirectoryLister cachingDirectoryLister = new CachingDirectoryLister(new Duration(5, TimeUnit.MINUTES), DataSize.of(100, KILOBYTE), List.of("test_dbname.test_table"));
-        assertEquals(cachingDirectoryLister.getRequestCount(), 0);
+        assertThat(cachingDirectoryLister.getRequestCount()).isEqualTo(0);
 
         int totalCount = 100;
         CountDownLatch firstVisit = new CountDownLatch(1);
@@ -379,51 +379,51 @@ public class TestBackgroundHiveSplitLoader
         }
 
         for (Future<List<HiveSplit>> future : futures) {
-            assertEquals(future.get().size(), TEST_LOCATIONS.size());
+            assertThat(future.get().size()).isEqualTo(TEST_LOCATIONS.size());
         }
-        assertEquals(cachingDirectoryLister.getRequestCount(), totalCount);
-        assertEquals(cachingDirectoryLister.getHitCount(), totalCount - 1);
-        assertEquals(cachingDirectoryLister.getMissCount(), 1);
+        assertThat(cachingDirectoryLister.getRequestCount()).isEqualTo(totalCount);
+        assertThat(cachingDirectoryLister.getHitCount()).isEqualTo(totalCount - 1);
+        assertThat(cachingDirectoryLister.getMissCount()).isEqualTo(1);
     }
 
     @Test
     public void testGetBucketNumber()
     {
         // legacy Presto naming pattern
-        assertEquals(getBucketNumber("20190526_072952_00009_fn7s5_bucket-00234"), OptionalInt.of(234));
-        assertEquals(getBucketNumber("20190526_072952_00009_fn7s5_bucket-00234.txt"), OptionalInt.of(234));
-        assertEquals(getBucketNumber("20190526_235847_87654_fn7s5_bucket-56789"), OptionalInt.of(56789));
+        assertThat(getBucketNumber("20190526_072952_00009_fn7s5_bucket-00234")).isEqualTo(OptionalInt.of(234));
+        assertThat(getBucketNumber("20190526_072952_00009_fn7s5_bucket-00234.txt")).isEqualTo(OptionalInt.of(234));
+        assertThat(getBucketNumber("20190526_235847_87654_fn7s5_bucket-56789")).isEqualTo(OptionalInt.of(56789));
 
         // Hive
-        assertEquals(getBucketNumber("0234_0"), OptionalInt.of(234));
-        assertEquals(getBucketNumber("000234_0"), OptionalInt.of(234));
-        assertEquals(getBucketNumber("0234_99"), OptionalInt.of(234));
-        assertEquals(getBucketNumber("0234_0.txt"), OptionalInt.of(234));
-        assertEquals(getBucketNumber("0234_0_copy_1"), OptionalInt.of(234));
+        assertThat(getBucketNumber("0234_0")).isEqualTo(OptionalInt.of(234));
+        assertThat(getBucketNumber("000234_0")).isEqualTo(OptionalInt.of(234));
+        assertThat(getBucketNumber("0234_99")).isEqualTo(OptionalInt.of(234));
+        assertThat(getBucketNumber("0234_0.txt")).isEqualTo(OptionalInt.of(234));
+        assertThat(getBucketNumber("0234_0_copy_1")).isEqualTo(OptionalInt.of(234));
         // starts with non-zero
-        assertEquals(getBucketNumber("234_99"), OptionalInt.of(234));
-        assertEquals(getBucketNumber("1234_0_copy_1"), OptionalInt.of(1234));
+        assertThat(getBucketNumber("234_99")).isEqualTo(OptionalInt.of(234));
+        assertThat(getBucketNumber("1234_0_copy_1")).isEqualTo(OptionalInt.of(1234));
 
         // Hive ACID
-        assertEquals(getBucketNumber("bucket_1234"), OptionalInt.of(1234));
-        assertEquals(getBucketNumber("bucket_01234"), OptionalInt.of(1234));
+        assertThat(getBucketNumber("bucket_1234")).isEqualTo(OptionalInt.of(1234));
+        assertThat(getBucketNumber("bucket_01234")).isEqualTo(OptionalInt.of(1234));
 
         // not matching
-        assertEquals(getBucketNumber("0234.txt"), OptionalInt.empty());
-        assertEquals(getBucketNumber("0234.txt"), OptionalInt.empty());
+        assertThat(getBucketNumber("0234.txt")).isEqualTo(OptionalInt.empty());
+        assertThat(getBucketNumber("0234.txt")).isEqualTo(OptionalInt.empty());
     }
 
     @Test
     public void testGetAttemptId()
     {
-        assertFalse(hasAttemptId("bucket_00000"));
-        assertTrue(hasAttemptId("bucket_00000_0"));
-        assertTrue(hasAttemptId("bucket_00000_10"));
-        assertTrue(hasAttemptId("bucket_00000_1000"));
-        assertFalse(hasAttemptId("bucket_00000__1000"));
-        assertFalse(hasAttemptId("bucket_00000_a"));
-        assertFalse(hasAttemptId("bucket_00000_ad"));
-        assertFalse(hasAttemptId("base_00000_00"));
+        assertThat(hasAttemptId("bucket_00000")).isFalse();
+        assertThat(hasAttemptId("bucket_00000_0")).isTrue();
+        assertThat(hasAttemptId("bucket_00000_10")).isTrue();
+        assertThat(hasAttemptId("bucket_00000_1000")).isTrue();
+        assertThat(hasAttemptId("bucket_00000__1000")).isFalse();
+        assertThat(hasAttemptId("bucket_00000_a")).isFalse();
+        assertThat(hasAttemptId("bucket_00000_ad")).isFalse();
+        assertThat(hasAttemptId("base_00000_00")).isFalse();
     }
 
     @Test
@@ -495,7 +495,7 @@ public class TestBackgroundHiveSplitLoader
                 .hasMessageEndingWith("loading error occurred");
 
         if (threads == 1) {
-            assertFalse(iteratorUsedAfterException.get());
+            assertThat(iteratorUsedAfterException.get()).isFalse();
         }
     }
 
@@ -515,7 +515,7 @@ public class TestBackgroundHiveSplitLoader
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
 
-        assertEquals(drainSplits(hiveSplitSource).size(), 17);
+        assertThat(drainSplits(hiveSplitSource).size()).isEqualTo(17);
     }
 
     @Test
@@ -531,7 +531,7 @@ public class TestBackgroundHiveSplitLoader
                 List.of(),
                 Optional.empty(),
                 Map.of(
-                        "transactional", "true",
+                        TRANSACTIONAL, "true",
                         "transactional_properties", "insert_only"));
 
         List<Location> fileLocations = List.of(
@@ -577,7 +577,7 @@ public class TestBackgroundHiveSplitLoader
                 tableLocation.toString(),
                 List.of(),
                 Optional.empty(),
-                Map.of("transactional", "true"));
+                Map.of(TRANSACTIONAL, "true"));
 
         Location originalFile = tableLocation.appendPath("000000_1");
         try (OutputStream outputStream = fileSystem.newOutputFile(originalFile).create()) {
@@ -620,7 +620,7 @@ public class TestBackgroundHiveSplitLoader
                 tableLocation.toString(),
                 List.of(),
                 Optional.empty(),
-                Map.of("transactional", "true"));
+                Map.of(TRANSACTIONAL, "true"));
 
         List<Location> fileLocations = List.of(
                 tableLocation.appendPath("000000_1"),
@@ -665,7 +665,7 @@ public class TestBackgroundHiveSplitLoader
                 tableLocation.toString(),
                 List.of(),
                 Optional.empty(),
-                Map.of("transactional", "true"));
+                Map.of(TRANSACTIONAL, "true"));
 
         List<Location> fileLocations = List.of(
                 tableLocation.appendPath("000000_1"), // _orc_acid_version does not exist, so it's assumed to be "ORC ACID version 0"
@@ -708,7 +708,7 @@ public class TestBackgroundHiveSplitLoader
                 tableLocation.toString(),
                 List.of(),
                 Optional.empty(),
-                Map.of("transactional", "true"));
+                Map.of(TRANSACTIONAL, "true"));
 
         List<Location> fileLocations = List.of(
                 tableLocation.appendPath("000000_1"),
@@ -777,9 +777,10 @@ public class TestBackgroundHiveSplitLoader
             throws IOException
     {
         CachingDirectoryLister directoryLister = new CachingDirectoryLister(new Duration(0, TimeUnit.MINUTES), DataSize.ofBytes(0), List.of());
-        Properties schema = new Properties();
-        schema.setProperty(FILE_INPUT_FORMAT, SYMLINK_TEXT_INPUT_FORMAT_CLASS);
-        schema.setProperty(SERIALIZATION_LIB, AVRO.getSerde());
+        Map<String, String> schema = ImmutableMap.<String, String>builder()
+                .put(FILE_INPUT_FORMAT, SYMLINK_TEXT_INPUT_FORMAT_CLASS)
+                .put(SERIALIZATION_LIB, AVRO.getSerde())
+                .buildOrThrow();
 
         Location firstFilePath = Location.of("memory:///db_name/table_name/file1");
         Location secondFilePath = Location.of("memory:///db_name/table_name/file2");
@@ -807,9 +808,9 @@ public class TestBackgroundHiveSplitLoader
                 locations,
                 true);
         List<InternalHiveSplit> splits = ImmutableList.copyOf(splitIterator);
-        assertEquals(splits.size(), 2);
-        assertEquals(splits.get(0).getPath(), firstFilePath.toString());
-        assertEquals(splits.get(1).getPath(), secondFilePath.toString());
+        assertThat(splits.size()).isEqualTo(2);
+        assertThat(splits.get(0).getPath()).isEqualTo(firstFilePath.toString());
+        assertThat(splits.get(1).getPath()).isEqualTo(secondFilePath.toString());
     }
 
     @Test
@@ -817,9 +818,10 @@ public class TestBackgroundHiveSplitLoader
             throws IOException
     {
         CachingDirectoryLister directoryLister = new CachingDirectoryLister(new Duration(5, TimeUnit.MINUTES), DataSize.of(100, KILOBYTE), List.of());
-        Properties schema = new Properties();
-        schema.setProperty("file.inputformat", SYMLINK_TEXT_INPUT_FORMAT_CLASS);
-        schema.setProperty(SERIALIZATION_LIB, AVRO.getSerde());
+        Map<String, String> schema = ImmutableMap.<String, String>builder()
+                .put(FILE_INPUT_FORMAT, SYMLINK_TEXT_INPUT_FORMAT_CLASS)
+                .put(SERIALIZATION_LIB, AVRO.getSerde())
+                .buildOrThrow();
 
         Location filePath = Location.of("memory:///db_name/table_name/file1");
         Location directoryPath = Location.of("memory:///db_name/table_name/dir/file2");
@@ -848,9 +850,9 @@ public class TestBackgroundHiveSplitLoader
                 locations,
                 false);
         List<InternalHiveSplit> splits = ImmutableList.copyOf(splitIterator);
-        assertEquals(splits.size(), 2);
-        assertEquals(splits.get(0).getPath(), filePath.toString());
-        assertEquals(splits.get(1).getPath(), directoryPath.toString());
+        assertThat(splits.size()).isEqualTo(2);
+        assertThat(splits.get(0).getPath()).isEqualTo(filePath.toString());
+        assertThat(splits.get(1).getPath()).isEqualTo(directoryPath.toString());
     }
 
     @Test

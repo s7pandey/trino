@@ -40,7 +40,6 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -55,7 +54,7 @@ import static io.trino.testing.TestingHandles.TEST_CATALOG_HANDLE;
 import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
-import static org.testng.Assert.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class TestNodeLocalDynamicSplitPruning
 {
@@ -87,11 +86,11 @@ class TestNodeLocalDynamicSplitPruning
         HiveConfig config = new HiveConfig();
         HiveTransactionHandle transaction = new HiveTransactionHandle(false);
         try (ConnectorPageSource emptyPageSource = createTestingPageSource(transaction, config, getDynamicFilter(getTupleDomainForBucketSplitPruning()))) {
-            assertEquals(emptyPageSource.getClass(), EmptyPageSource.class);
+            assertThat(emptyPageSource.getClass()).isEqualTo(EmptyPageSource.class);
         }
 
         try (ConnectorPageSource nonEmptyPageSource = createTestingPageSource(transaction, config, getDynamicFilter(getNonSelectiveBucketTupleDomain()))) {
-            assertEquals(nonEmptyPageSource.getClass(), HivePageSource.class);
+            assertThat(nonEmptyPageSource.getClass()).isEqualTo(HivePageSource.class);
         }
     }
 
@@ -103,11 +102,11 @@ class TestNodeLocalDynamicSplitPruning
         HiveTransactionHandle transaction = new HiveTransactionHandle(false);
 
         try (ConnectorPageSource emptyPageSource = createTestingPageSource(transaction, config, getDynamicFilter(getTupleDomainForPartitionSplitPruning()))) {
-            assertEquals(emptyPageSource.getClass(), EmptyPageSource.class);
+            assertThat(emptyPageSource.getClass()).isEqualTo(EmptyPageSource.class);
         }
 
         try (ConnectorPageSource nonEmptyPageSource = createTestingPageSource(transaction, config, getDynamicFilter(getNonSelectivePartitionTupleDomain()))) {
-            assertEquals(nonEmptyPageSource.getClass(), HivePageSource.class);
+            assertThat(nonEmptyPageSource.getClass()).isEqualTo(HivePageSource.class);
         }
     }
 
@@ -118,9 +117,10 @@ class TestNodeLocalDynamicSplitPruning
         TrinoFileSystemFactory fileSystemFactory = new MemoryFileSystemFactory();
         fileSystemFactory.create(ConnectorIdentity.ofUser("test")).newOutputFile(location).create().close();
 
-        Properties splitProperties = new Properties();
-        splitProperties.setProperty(FILE_INPUT_FORMAT, hiveConfig.getHiveStorageFormat().getInputFormat());
-        splitProperties.setProperty(SERIALIZATION_LIB, hiveConfig.getHiveStorageFormat().getSerde());
+        Map<String, String> splitProperties = ImmutableMap.<String, String>builder()
+                .put(FILE_INPUT_FORMAT, hiveConfig.getHiveStorageFormat().getInputFormat())
+                .put(SERIALIZATION_LIB, hiveConfig.getHiveStorageFormat().getSerde())
+                .buildOrThrow();
         HiveSplit split = new HiveSplit(
                 "",
                 location.toString(),
