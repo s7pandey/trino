@@ -97,7 +97,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.UnaryOperator;
 
-import static io.airlift.tracing.Tracing.attribute;
 import static io.trino.tracing.ScopedSpan.scopedSpan;
 import static java.util.Objects.requireNonNull;
 
@@ -514,6 +513,15 @@ public class TracingConnectorMetadata
     }
 
     @Override
+    public void dropNotNullConstraint(ConnectorSession session, ConnectorTableHandle tableHandle, ColumnHandle column)
+    {
+        Span span = startSpan("dropNotNull", tableHandle);
+        try (var ignored = scopedSpan(span)) {
+            delegate.dropNotNullConstraint(session, tableHandle, column);
+        }
+    }
+
+    @Override
     public void setTableAuthorization(ConnectorSession session, SchemaTableName tableName, TrinoPrincipal principal)
     {
         Span span = startSpan("setTableAuthorization", tableName);
@@ -700,6 +708,18 @@ public class TracingConnectorMetadata
     }
 
     @Override
+    public Optional<ConnectorOutputMetadata> finishInsert(ConnectorSession session, ConnectorInsertTableHandle insertHandle, List<ConnectorTableHandle> sourceTableHandles, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics)
+    {
+        Span span = startSpan("finishInsert");
+        if (span.isRecording()) {
+            span.setAttribute(TrinoAttributes.HANDLE, insertHandle.toString());
+        }
+        try (var ignored = scopedSpan(span)) {
+            return delegate.finishInsert(session, insertHandle, sourceTableHandles, fragments, computedStatistics);
+        }
+    }
+
+    @Override
     public boolean delegateMaterializedViewRefreshToConnector(ConnectorSession session, SchemaTableName viewName)
     {
         Span span = startSpan("delegateMaterializedViewRefreshToConnector", viewName);
@@ -727,11 +747,18 @@ public class TracingConnectorMetadata
     }
 
     @Override
-    public Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(ConnectorSession session, ConnectorTableHandle tableHandle, ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics, List<ConnectorTableHandle> sourceTableHandles)
+    public Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(
+            ConnectorSession session,
+            ConnectorTableHandle tableHandle,
+            ConnectorInsertTableHandle insertHandle,
+            Collection<Slice> fragments,
+            Collection<ComputedStatistics> computedStatistics,
+            List<ConnectorTableHandle> sourceTableHandles,
+            List<String> sourceTableFunctions)
     {
         Span span = startSpan("finishRefreshMaterializedView", tableHandle);
         try (var ignored = scopedSpan(span)) {
-            return delegate.finishRefreshMaterializedView(session, tableHandle, insertHandle, fragments, computedStatistics, sourceTableHandles);
+            return delegate.finishRefreshMaterializedView(session, tableHandle, insertHandle, fragments, computedStatistics, sourceTableHandles, sourceTableFunctions);
         }
     }
 
@@ -1246,11 +1273,17 @@ public class TracingConnectorMetadata
     }
 
     @Override
-    public void createMaterializedView(ConnectorSession session, SchemaTableName viewName, ConnectorMaterializedViewDefinition definition, boolean replace, boolean ignoreExisting)
+    public void createMaterializedView(
+            ConnectorSession session,
+            SchemaTableName viewName,
+            ConnectorMaterializedViewDefinition definition,
+            Map<String, Object> properties,
+            boolean replace,
+            boolean ignoreExisting)
     {
         Span span = startSpan("createMaterializedView", viewName);
         try (var ignored = scopedSpan(span)) {
-            delegate.createMaterializedView(session, viewName, definition, replace, ignoreExisting);
+            delegate.createMaterializedView(session, viewName, definition, properties, replace, ignoreExisting);
         }
     }
 
@@ -1287,6 +1320,15 @@ public class TracingConnectorMetadata
         Span span = startSpan("getMaterializedView", viewName);
         try (var ignored = scopedSpan(span)) {
             return delegate.getMaterializedView(session, viewName);
+        }
+    }
+
+    @Override
+    public Map<String, Object> getMaterializedViewProperties(ConnectorSession session, SchemaTableName viewName, ConnectorMaterializedViewDefinition materializedViewDefinition)
+    {
+        Span span = startSpan("getMaterializedViewProperties", viewName);
+        try (var ignored = scopedSpan(span)) {
+            return delegate.getMaterializedViewProperties(session, viewName, materializedViewDefinition);
         }
     }
 
@@ -1378,7 +1420,7 @@ public class TracingConnectorMetadata
     private Span startSpan(String methodName, Optional<String> schemaName)
     {
         return startSpan(methodName)
-                .setAllAttributes(attribute(TrinoAttributes.SCHEMA, schemaName));
+                .setAttribute(TrinoAttributes.SCHEMA, schemaName.orElse(null));
     }
 
     private Span startSpan(String methodName, SchemaTableName table)
@@ -1391,8 +1433,8 @@ public class TracingConnectorMetadata
     private Span startSpan(String methodName, SchemaTablePrefix prefix)
     {
         return startSpan(methodName)
-                .setAllAttributes(attribute(TrinoAttributes.SCHEMA, prefix.getSchema()))
-                .setAllAttributes(attribute(TrinoAttributes.TABLE, prefix.getTable()));
+                .setAttribute(TrinoAttributes.SCHEMA, prefix.getSchema().orElse(null))
+                .setAttribute(TrinoAttributes.TABLE, prefix.getTable().orElse(null));
     }
 
     private Span startSpan(String methodName, ConnectorTableHandle handle)

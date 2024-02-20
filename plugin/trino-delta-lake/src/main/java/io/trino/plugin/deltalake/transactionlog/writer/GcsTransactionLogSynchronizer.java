@@ -20,9 +20,10 @@ import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.spi.connector.ConnectorSession;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.FileAlreadyExistsException;
 
+import static io.airlift.slice.Slices.wrappedBuffer;
 import static java.util.Objects.requireNonNull;
 
 public class GcsTransactionLogSynchronizer
@@ -42,8 +43,11 @@ public class GcsTransactionLogSynchronizer
     public void write(ConnectorSession session, String clusterId, Location newLogEntryPath, byte[] entryContents)
     {
         TrinoFileSystem fileSystem = fileSystemFactory.create(session);
-        try (OutputStream outputStream = fileSystem.newOutputFile(newLogEntryPath).createExclusive()) {
-            outputStream.write(entryContents);
+        try {
+            fileSystem.newOutputFile(newLogEntryPath).createExclusive(wrappedBuffer(entryContents));
+        }
+        catch (FileAlreadyExistsException e) {
+            throw new TransactionConflictException("Conflict detected while writing Transaction Log entry " + newLogEntryPath + " to GCS", e);
         }
         catch (IOException e) {
             throw new UncheckedIOException(e);

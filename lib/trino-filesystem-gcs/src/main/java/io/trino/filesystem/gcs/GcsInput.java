@@ -36,7 +36,7 @@ final class GcsInput
     private final GcsLocation location;
     private final Storage storage;
     private final int readBlockSize;
-    private OptionalLong length;
+    private final OptionalLong length;
     private boolean closed;
 
     public GcsInput(GcsLocation location, Storage storage, int readBlockSize, OptionalLong length)
@@ -84,7 +84,7 @@ final class GcsInput
             return readNBytes(readChannel, buffer, bufferOffset, bufferLength);
         }
         catch (RuntimeException e) {
-            throw handleGcsException(e, "read file", location);
+            throw handleGcsException(e, "reading file", location);
         }
     }
 

@@ -62,7 +62,7 @@ public class TestRaptorMySqlConnectorTest
     private static QueryRunner createRaptorMySqlQueryRunner(String mysqlUrl)
             throws Exception
     {
-        DistributedQueryRunner queryRunner = DistributedQueryRunner.builder(createSession("tpch")).build();
+        QueryRunner queryRunner = DistributedQueryRunner.builder(createSession("tpch")).build();
 
         queryRunner.installPlugin(new TpchPlugin());
         queryRunner.createCatalog("tpch", "tpch");
@@ -72,6 +72,7 @@ public class TestRaptorMySqlConnectorTest
         Map<String, String> raptorProperties = ImmutableMap.<String, String>builder()
                 .put("metadata.db.type", "mysql")
                 .put("metadata.db.url", mysqlUrl)
+                .put("storage.compaction-enabled", "false")
                 .put("storage.data-directory", new File(baseDir, "data").getAbsolutePath())
                 .put("storage.max-shard-rows", "2000")
                 .put("backup.provider", "file")

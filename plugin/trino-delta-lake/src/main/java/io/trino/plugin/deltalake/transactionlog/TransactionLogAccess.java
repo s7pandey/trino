@@ -68,11 +68,15 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
+import static com.google.common.base.Predicates.alwaysFalse;
+import static com.google.common.base.Predicates.alwaysTrue;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.slice.SizeOf.estimatedSizeOf;
 import static io.airlift.slice.SizeOf.instanceSize;
 import static io.trino.cache.CacheUtils.invalidateAllIf;
@@ -223,18 +227,48 @@ public class TransactionLogAccess
                 .orElseThrow(() -> new TrinoException(DELTA_LAKE_INVALID_SCHEMA, "Metadata not found in transaction log for " + tableSnapshot.getTable()));
     }
 
+    // Deprecated in favor of the namesake method which allows checkpoint filtering
+    // to be able to perform partition pruning and stats projection on the `add` entries
+    // from the checkpoint.
+    /**
+     * @see #getActiveFiles(TableSnapshot, MetadataEntry, ProtocolEntry, TupleDomain, Optional, ConnectorSession)
+     */
     @Deprecated
-    public List<AddFileEntry> getActiveFiles(TableSnapshot tableSnapshot, MetadataEntry metadataEntry, ProtocolEntry protocolEntry, ConnectorSession session)
+    public Stream<AddFileEntry> getActiveFiles(TableSnapshot tableSnapshot, MetadataEntry metadataEntry, ProtocolEntry protocolEntry, ConnectorSession session)
     {
-        return getActiveFiles(tableSnapshot, metadataEntry, protocolEntry, TupleDomain.all(), session);
+        return retrieveActiveFiles(tableSnapshot, metadataEntry, protocolEntry, TupleDomain.all(), alwaysTrue(), session);
     }
 
-    public List<AddFileEntry> getActiveFiles(TableSnapshot tableSnapshot, MetadataEntry metadataEntry, ProtocolEntry protocolEntry, TupleDomain<DeltaLakeColumnHandle> partitionConstraint, ConnectorSession session)
+    public Stream<AddFileEntry> getActiveFiles(
+            TableSnapshot tableSnapshot,
+            MetadataEntry metadataEntry,
+            ProtocolEntry protocolEntry,
+            TupleDomain<DeltaLakeColumnHandle> partitionConstraint,
+            Optional<Set<DeltaLakeColumnHandle>> projectedColumns,
+            ConnectorSession session)
+    {
+        Predicate<String> addStatsMinMaxColumnFilter = alwaysFalse();
+        if (projectedColumns.isPresent()) {
+            Set<String> baseColumnNames = projectedColumns.get().stream()
+                    .filter(DeltaLakeColumnHandle::isBaseColumn) // Only base column stats are supported
+                    .map(DeltaLakeColumnHandle::getColumnName)
+                    .collect(toImmutableSet());
+            addStatsMinMaxColumnFilter = baseColumnNames::contains;
+        }
+        return retrieveActiveFiles(tableSnapshot, metadataEntry, protocolEntry, partitionConstraint, addStatsMinMaxColumnFilter, session);
+    }
+
+    private Stream<AddFileEntry> retrieveActiveFiles(
+            TableSnapshot tableSnapshot,
+            MetadataEntry metadataEntry,
+            ProtocolEntry protocolEntry,
+            TupleDomain<DeltaLakeColumnHandle> partitionConstraint,
+            Predicate<String> addStatsMinMaxColumnFilter,
+            ConnectorSession session)
     {
         try {
             if (isCheckpointFilteringEnabled(session)) {
-                return loadActiveFiles(tableSnapshot, metadataEntry, protocolEntry, partitionConstraint, session).stream()
-                        .collect(toImmutableList());
+                return loadActiveFiles(tableSnapshot, metadataEntry, protocolEntry, partitionConstraint, addStatsMinMaxColumnFilter, session);
             }
 
             TableVersion tableVersion = new TableVersion(new TableLocation(tableSnapshot.getTable(), tableSnapshot.getTableLocation()), tableSnapshot.getVersion());
@@ -264,21 +298,25 @@ public class TransactionLogAccess
                     }
                 }
 
-                List<AddFileEntry> activeFiles = loadActiveFiles(tableSnapshot, metadataEntry, protocolEntry, TupleDomain.all(), session);
+                List<AddFileEntry> activeFiles;
+                try (Stream<AddFileEntry> addFileEntryStream = loadActiveFiles(tableSnapshot, metadataEntry, protocolEntry, TupleDomain.all(), alwaysTrue(), session)) {
+                    activeFiles = addFileEntryStream.collect(toImmutableList());
+                }
                 return new DeltaLakeDataFileCacheEntry(tableSnapshot.getVersion(), activeFiles);
             });
-            return cacheEntry.getActiveFiles();
+            return cacheEntry.getActiveFiles().stream();
         }
         catch (ExecutionException | UncheckedExecutionException e) {
             throw new TrinoException(DELTA_LAKE_INVALID_SCHEMA, "Failed accessing transaction log for table: " + tableSnapshot.getTable(), e);
         }
     }
 
-    private List<AddFileEntry> loadActiveFiles(
+    private Stream<AddFileEntry> loadActiveFiles(
             TableSnapshot tableSnapshot,
             MetadataEntry metadataEntry,
             ProtocolEntry protocolEntry,
             TupleDomain<DeltaLakeColumnHandle> partitionConstraint,
+            Predicate<String> addStatsMinMaxColumnFilter,
             ConnectorSession session)
     {
         List<Transaction> transactions = tableSnapshot.getTransactions();
@@ -290,12 +328,12 @@ public class TransactionLogAccess
                 fileSystemFactory.create(session),
                 fileFormatDataSourceStats,
                 Optional.of(new MetadataAndProtocolEntry(metadataEntry, protocolEntry)),
-                partitionConstraint)) {
+                partitionConstraint,
+                Optional.of(addStatsMinMaxColumnFilter))) {
             return activeAddEntries(checkpointEntries, transactions)
                     .filter(partitionConstraint.isAll()
                             ? addAction -> true
-                            : addAction -> partitionMatchesPredicate(addAction.getCanonicalPartitionValues(), partitionConstraint.getDomains().orElseThrow()))
-                    .collect(toImmutableList());
+                            : addAction -> partitionMatchesPredicate(addAction.getCanonicalPartitionValues(), partitionConstraint.getDomains().orElseThrow()));
         }
         catch (IOException e) {
             throw new TrinoException(DELTA_LAKE_INVALID_SCHEMA, "Error reading transaction log for " + tableSnapshot.getTable(), e);
@@ -369,22 +407,23 @@ public class TransactionLogAccess
             Set<CheckpointEntryIterator.EntryType> entryTypes,
             Function<Stream<DeltaLakeTransactionLogEntry>, Stream<Object>> entryMapper)
     {
-        Stream<Object> entries = getEntries(
+        try (Stream<Object> entries = getEntries(
                 tableSnapshot,
                 entryTypes,
                 (checkpointStream, jsonStream) -> entryMapper.apply(Stream.concat(checkpointStream, jsonStream.stream().map(Transaction::transactionEntries).flatMap(Collection::stream))),
                 session,
                 fileSystemFactory.create(session),
-                fileFormatDataSourceStats);
-
-        return entries.collect(toImmutableMap(Object::getClass, Function.identity(), (first, second) -> second));
+                fileFormatDataSourceStats)) {
+            return entries.collect(toImmutableMap(Object::getClass, Function.identity(), (first, second) -> second));
+        }
     }
 
     public ProtocolEntry getProtocolEntry(ConnectorSession session, TableSnapshot tableSnapshot)
     {
-        return getProtocolEntries(tableSnapshot, session)
-                .reduce((first, second) -> second)
-                .orElseThrow(() -> new TrinoException(DELTA_LAKE_INVALID_SCHEMA, "Protocol entry not found in transaction log for table " + tableSnapshot.getTable()));
+        try (Stream<ProtocolEntry> protocolEntries = getProtocolEntries(tableSnapshot, session)) {
+            return protocolEntries.reduce((first, second) -> second)
+                    .orElseThrow(() -> new TrinoException(DELTA_LAKE_INVALID_SCHEMA, "Protocol entry not found in transaction log for table " + tableSnapshot.getTable()));
+        }
     }
 
     public Stream<ProtocolEntry> getProtocolEntries(TableSnapshot tableSnapshot, ConnectorSession session)
@@ -433,7 +472,7 @@ public class TransactionLogAccess
             List<Transaction> transactions = tableSnapshot.getTransactions();
             // Passing TupleDomain.all() because this method is used for getting all entries
             Stream<DeltaLakeTransactionLogEntry> checkpointEntries = tableSnapshot.getCheckpointTransactionLogEntries(
-                    session, entryTypes, checkpointSchemaManager, typeManager, fileSystem, stats, Optional.empty(), TupleDomain.all());
+                    session, entryTypes, checkpointSchemaManager, typeManager, fileSystem, stats, Optional.empty(), TupleDomain.all(), Optional.of(alwaysTrue()));
 
             return entryMapper.apply(
                     checkpointEntries,

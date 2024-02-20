@@ -13,8 +13,6 @@
  */
 package io.trino.spi.block;
 
-import io.airlift.slice.Slice;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -30,7 +28,6 @@ import static io.trino.spi.block.BlockUtil.checkValidRegion;
 import static io.trino.spi.block.BlockUtil.compactArray;
 import static io.trino.spi.block.DictionaryId.randomDictionaryId;
 import static java.lang.Math.min;
-import static java.util.Collections.singletonList;
 import static java.util.Objects.requireNonNull;
 
 public final class DictionaryBlock
@@ -132,48 +129,6 @@ public final class DictionaryBlock
     public int getRawIdsOffset()
     {
         return idsOffset;
-    }
-
-    @Override
-    public int getSliceLength(int position)
-    {
-        return dictionary.getSliceLength(getId(position));
-    }
-
-    @Override
-    public byte getByte(int position, int offset)
-    {
-        return dictionary.getByte(getId(position), offset);
-    }
-
-    @Override
-    public short getShort(int position, int offset)
-    {
-        return dictionary.getShort(getId(position), offset);
-    }
-
-    @Override
-    public int getInt(int position, int offset)
-    {
-        return dictionary.getInt(getId(position), offset);
-    }
-
-    @Override
-    public long getLong(int position, int offset)
-    {
-        return dictionary.getLong(getId(position), offset);
-    }
-
-    @Override
-    public Slice getSlice(int position, int offset, int length)
-    {
-        return dictionary.getSlice(getId(position), offset, length);
-    }
-
-    @Override
-    public <T> T getObject(int position, Class<T> clazz)
-    {
-        return dictionary.getObject(getId(position), clazz);
     }
 
     @Override
@@ -420,6 +375,11 @@ public final class DictionaryBlock
     public Block copyRegion(int position, int length)
     {
         checkValidRegion(positionCount, position, length);
+        if (length == 0) {
+            // explicit support for case when length == 0 which might otherwise fail
+            // on getId(position) if position == positionCount
+            return dictionary.copyRegion(0, 0);
+        }
         // Avoid repeated volatile reads to the uniqueIds field
         int uniqueIds = this.uniqueIds;
         if (length <= 1 || (uniqueIds == dictionary.getPositionCount() && isSequentialIds)) {
@@ -529,9 +489,20 @@ public final class DictionaryBlock
     }
 
     @Override
-    public List<Block> getChildren()
+    public boolean isLoaded()
     {
-        return singletonList(getDictionary());
+        return dictionary.isLoaded();
+    }
+
+    @Override
+    public Block getLoadedBlock()
+    {
+        Block loadedDictionary = dictionary.getLoadedBlock();
+
+        if (loadedDictionary == dictionary) {
+            return this;
+        }
+        return createInternal(idsOffset, getPositionCount(), loadedDictionary, ids, randomDictionaryId());
     }
 
     @Override

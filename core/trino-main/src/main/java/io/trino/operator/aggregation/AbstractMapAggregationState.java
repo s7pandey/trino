@@ -14,7 +14,6 @@
 package io.trino.operator.aggregation;
 
 import com.google.common.base.Throwables;
-import com.google.common.primitives.Ints;
 import io.trino.operator.VariableWidthData;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.BlockBuilder;
@@ -35,6 +34,7 @@ import static io.airlift.slice.SizeOf.sizeOf;
 import static io.trino.operator.VariableWidthData.EMPTY_CHUNK;
 import static io.trino.operator.VariableWidthData.POINTER_SIZE;
 import static io.trino.spi.StandardErrorCode.GENERIC_INSUFFICIENT_RESOURCES;
+import static java.lang.Math.clamp;
 import static java.lang.Math.multiplyExact;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static java.util.Objects.checkIndex;
@@ -133,7 +133,7 @@ public abstract class AbstractMapAggregationState
         boolean variableWidth = keyType.isFlatVariableWidth() || valueType.isFlatVariableWidth();
         variableWidthData = variableWidth ? new VariableWidthData() : null;
         if (grouped) {
-            recordGroupIdOffset = (variableWidth ? POINTER_SIZE : 0);
+            recordGroupIdOffset = variableWidth ? POINTER_SIZE : 0;
             recordNextIndexOffset = recordGroupIdOffset + Integer.BYTES;
             recordKeyOffset = recordNextIndexOffset + Integer.BYTES;
         }
@@ -141,7 +141,7 @@ public abstract class AbstractMapAggregationState
             // use MIN_VALUE so that when it is added to the record offset we get a negative value, and thus an ArrayIndexOutOfBoundsException
             recordGroupIdOffset = Integer.MIN_VALUE;
             recordNextIndexOffset = Integer.MIN_VALUE;
-            recordKeyOffset = (variableWidth ? POINTER_SIZE : 0);
+            recordKeyOffset = variableWidth ? POINTER_SIZE : 0;
         }
         recordValueNullOffset = recordKeyOffset + keyType.getFlatFixedSize();
         recordValueOffset = recordValueNullOffset + 1;
@@ -186,7 +186,7 @@ public abstract class AbstractMapAggregationState
     private static byte[][] createRecordGroups(int capacity, int recordSize)
     {
         if (capacity < RECORDS_PER_GROUP) {
-            return new byte[][]{new byte[multiplyExact(capacity, recordSize)]};
+            return new byte[][] {new byte[multiplyExact(capacity, recordSize)]};
         }
 
         byte[][] groups = new byte[(capacity + 1) >> RECORDS_PER_GROUP_SHIFT][];
@@ -215,7 +215,7 @@ public abstract class AbstractMapAggregationState
 
         int currentSize = groupRecordIndex.length;
         if (requiredSize > currentSize) {
-            groupRecordIndex = Arrays.copyOf(groupRecordIndex, Ints.constrainToRange(requiredSize * 2, 1024, MAX_ARRAY_SIZE));
+            groupRecordIndex = Arrays.copyOf(groupRecordIndex, clamp(requiredSize * 2L, 1024, MAX_ARRAY_SIZE));
             Arrays.fill(groupRecordIndex, currentSize, groupRecordIndex.length, -1);
         }
     }
@@ -544,7 +544,7 @@ public abstract class AbstractMapAggregationState
 
     private static long repeat(byte value)
     {
-        return ((value & 0xFF) * 0x01_01_01_01_01_01_01_01L);
+        return (value & 0xFF) * 0x01_01_01_01_01_01_01_01L;
     }
 
     private static long match(long vector, long repeatedValue)

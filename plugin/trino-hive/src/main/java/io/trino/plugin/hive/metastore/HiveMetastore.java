@@ -13,7 +13,6 @@
  */
 package io.trino.plugin.hive.metastore;
 
-import com.google.common.collect.ImmutableMap;
 import io.trino.hive.thrift.metastore.DataOperationType;
 import io.trino.plugin.hive.HiveColumnStatisticType;
 import io.trino.plugin.hive.HivePartition;
@@ -36,7 +35,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
-import java.util.function.Function;
 
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 
@@ -50,20 +48,35 @@ public interface HiveMetastore
 
     Set<HiveColumnStatisticType> getSupportedColumnStatistics(Type type);
 
-    PartitionStatistics getTableStatistics(Table table);
+    /**
+     * @param columnNames Must not be empty.
+     */
+    Map<String, HiveColumnStatistics> getTableColumnStatistics(String databaseName, String tableName, Set<String> columnNames);
 
-    Map<String, PartitionStatistics> getPartitionStatistics(Table table, List<Partition> partitions);
+    /**
+     * @param columnNames Must not be empty.
+     */
+    Map<String, Map<String, HiveColumnStatistics>> getPartitionColumnStatistics(
+            String databaseName,
+            String tableName,
+            Set<String> partitionNames,
+            Set<String> columnNames);
 
-    void updateTableStatistics(String databaseName, String tableName, AcidTransaction transaction, Function<PartitionStatistics, PartitionStatistics> update);
-
-    default void updatePartitionStatistics(Table table, String partitionName, Function<PartitionStatistics, PartitionStatistics> update)
+    /**
+     * If true, callers should inspect table and partition parameters for spark stats.
+     * This method realy only exists for the ThriftHiveMetastore implementation. Spark mixes table and column statistics into the table parameters, and this breaks
+     * the abstractions of the metastore interface.
+     */
+    default boolean useSparkTableStatistics()
     {
-        updatePartitionStatistics(table, ImmutableMap.of(partitionName, update));
+        return false;
     }
 
-    void updatePartitionStatistics(Table table, Map<String, Function<PartitionStatistics, PartitionStatistics>> updates);
+    void updateTableStatistics(String databaseName, String tableName, AcidTransaction transaction, StatisticsUpdateMode mode, PartitionStatistics statisticsUpdate);
 
-    List<String> getAllTables(String databaseName);
+    void updatePartitionStatistics(Table table, StatisticsUpdateMode mode, Map<String, PartitionStatistics> partitionUpdates);
+
+    List<String> getTables(String databaseName);
 
     /**
      * @return List of tables, views and materialized views names from all schemas or Optional.empty if operation is not supported
@@ -75,14 +88,14 @@ public interface HiveMetastore
     /**
      * @return empty if operation is not supported
      */
-    Optional<Map<SchemaTableName, RelationType>> getRelationTypes();
+    Optional<Map<SchemaTableName, RelationType>> getAllRelationTypes();
 
     List<String> getTablesWithParameter(String databaseName, String parameterKey, String parameterValue);
 
     /**
      * Lists views and materialized views from given database.
      */
-    List<String> getAllViews(String databaseName);
+    List<String> getViews(String databaseName);
 
     /**
      * @return List of views including materialized views names from all schemas or Optional.empty if operation is not supported
@@ -244,7 +257,7 @@ public interface HiveMetastore
 
     boolean functionExists(String databaseName, String functionName, String signatureToken);
 
-    Collection<LanguageFunction> getFunctions(String databaseName);
+    Collection<LanguageFunction> getAllFunctions(String databaseName);
 
     Collection<LanguageFunction> getFunctions(String databaseName, String functionName);
 

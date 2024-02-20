@@ -1,7 +1,7 @@
 # Data types
 
-Trino has a set of built-in data types, described below.
-Additional types can be provided by plugins.
+Trino has a set of built-in data types, described below. Additional types can be
+[provided by plugins](/develop/types).
 
 (type-mapping-overview)=
 
@@ -104,11 +104,10 @@ IEEE Standard 754 for Binary Floating-Point Arithmetic.
 
 Example literals: `DOUBLE '10.3'`, `DOUBLE '1.03e1'`, `10.3e0`, `1.03e1`
 
-(fixed-precision-data-types)=
+(exact-numeric-data-types)=
+## Exact numeric
 
-## Fixed-precision
-
-Fixed-precision numbers can be expressed as numeric literals such as `1.1`, and
+Exact numeric values can be expressed as numeric literals such as `1.1`, and
 are supported by the `DECIMAL` data type.
 
 Underscore characters are ignored within literal values, and can be used to
@@ -121,8 +120,8 @@ Leading zeros in literal values are permitted and ignored. For example,
 
 ### `DECIMAL`
 
-A fixed-precision decimal number. Precision up to 38 digits is supported
-but performance is best up to 18 digits.
+A exact decimal number. Precision up to 38 digits is supported but performance
+is best up to 18 digits.
 
 The decimal type takes two literal parameters:
 
@@ -155,13 +154,20 @@ before any Unicode character usage with 4 digits. In the examples above
 with 6 digits require usage of the plus symbol before the code. For example,
 you need to use `\+01F600` for a grinning face emoji.
 
+Single quotes in string literals can be escaped by using another single quote: 
+`'I am big, it''s the pictures that got small!'`
+
 ### `CHAR`
 
 Fixed length character data. A `CHAR` type without length specified has a default length of 1.
 A `CHAR(x)` value always has `x` characters. For example, casting `dog` to `CHAR(7)`
 adds 4 implicit trailing spaces. Leading and trailing spaces are included in comparisons of
 `CHAR` values. As a result, two character values with different lengths (`CHAR(x)` and
-`CHAR(y)` where `x != y`) will never be equal.
+`CHAR(y)` where `x != y`) will never be equal. As with `VARCHAR`, a single quote in a `CHAR` 
+literal can be escaped with another single quote:
+```sql
+SELECT CHAR 'All right, Mr. DeMille, I''m ready for my close-up.'
+```
 
 Example type definitions: `char`, `char(20)`
 

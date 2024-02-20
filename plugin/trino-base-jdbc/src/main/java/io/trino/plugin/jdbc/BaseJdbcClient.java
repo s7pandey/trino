@@ -114,6 +114,7 @@ public abstract class BaseJdbcClient
     private final IdentifierMapping identifierMapping;
     private final boolean supportsRetries;
     private final JdbcRemoteIdentifiersFactory jdbcRemoteIdentifiersFactory = new JdbcRemoteIdentifiersFactory(this);
+    private Integer maxColumnNameLength;
 
     public BaseJdbcClient(
             String identifierQuote,
@@ -238,7 +239,7 @@ public abstract class BaseJdbcClient
                 PreparedStatement preparedStatement = queryBuilder.prepareStatement(this, session, connection, preparedQuery, Optional.empty())) {
             ResultSetMetaData metadata = preparedStatement.getMetaData();
             if (metadata == null) {
-                throw new UnsupportedOperationException("Query not supported: ResultSetMetaData not available for query: " + preparedQuery.getQuery());
+                throw new TrinoException(NOT_SUPPORTED, "Query not supported: ResultSetMetaData not available for query: " + preparedQuery.getQuery());
             }
             return new JdbcTableHandle(
                     new JdbcQueryRelationHandle(preparedQuery),
@@ -304,7 +305,7 @@ public abstract class BaseJdbcClient
             List<JdbcColumnHandle> columns = new ArrayList<>();
             while (resultSet.next()) {
                 // skip if table doesn't match expected
-                if (!(Objects.equals(remoteTableName, getRemoteTable(resultSet)))) {
+                if (!Objects.equals(remoteTableName, getRemoteTable(resultSet))) {
                     continue;
                 }
                 allColumns++;
@@ -526,6 +527,35 @@ public abstract class BaseJdbcClient
             ConnectorSession session,
             JoinType joinType,
             PreparedQuery leftSource,
+            Map<JdbcColumnHandle, String> leftProjections,
+            PreparedQuery rightSource,
+            Map<JdbcColumnHandle, String> rightProjections,
+            List<ParameterizedExpression> joinConditions,
+            JoinStatistics statistics)
+    {
+        try (Connection connection = this.connectionFactory.openConnection(session)) {
+            return Optional.of(queryBuilder.prepareJoinQuery(
+                    this,
+                    session,
+                    connection,
+                    joinType,
+                    leftSource,
+                    leftProjections,
+                    rightSource,
+                    rightProjections,
+                    joinConditions));
+        }
+        catch (SQLException e) {
+            throw new TrinoException(JDBC_ERROR, e);
+        }
+    }
+
+    @Deprecated
+    @Override
+    public Optional<PreparedQuery> legacyImplementJoin(
+            ConnectorSession session,
+            JoinType joinType,
+            PreparedQuery leftSource,
             PreparedQuery rightSource,
             List<JdbcJoinCondition> joinConditions,
             Map<JdbcColumnHandle, String> rightAssignments,
@@ -539,7 +569,7 @@ public abstract class BaseJdbcClient
         }
 
         try (Connection connection = this.connectionFactory.openConnection(session)) {
-            return Optional.of(queryBuilder.prepareJoinQuery(
+            return Optional.of(queryBuilder.legacyPrepareJoinQuery(
                     this,
                     session,
                     connection,
@@ -699,17 +729,11 @@ public abstract class BaseJdbcClient
 
     protected List<String> createTableSqls(RemoteTableName remoteTableName, List<String> columns, ConnectorTableMetadata tableMetadata)
     {
-        return ImmutableList.of(createTableSql(remoteTableName, columns, tableMetadata));
-    }
-
-    @Deprecated
-    protected String createTableSql(RemoteTableName remoteTableName, List<String> columns, ConnectorTableMetadata tableMetadata)
-    {
         if (tableMetadata.getComment().isPresent()) {
             throw new TrinoException(NOT_SUPPORTED, "This connector does not support creating tables with table comment");
         }
         checkArgument(tableMetadata.getProperties().isEmpty(), "Unsupported table properties: %s", tableMetadata.getProperties());
-        return format("CREATE TABLE %s (%s)", quoted(remoteTableName), join(", ", columns));
+        return ImmutableList.of(format("CREATE TABLE %s (%s)", quoted(remoteTableName), join(", ", columns)));
     }
 
     protected String getColumnDefinitionSql(ConnectorSession session, ColumnMetadata column, String columnName)
@@ -1085,6 +1109,23 @@ public abstract class BaseJdbcClient
     }
 
     @Override
+    public void dropNotNullConstraint(ConnectorSession session, JdbcTableHandle handle, JdbcColumnHandle column)
+    {
+        try (Connection connection = connectionFactory.openConnection(session)) {
+            verify(connection.getAutoCommit());
+            String remoteColumnName = identifierMapping.toRemoteColumnName(getRemoteIdentifiers(connection), column.getColumnName());
+            String sql = format(
+                    "ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL",
+                    quoted(handle.asPlainTable().getRemoteTableName()),
+                    quoted(remoteColumnName));
+            execute(session, connection, sql);
+        }
+        catch (SQLException e) {
+            throw new TrinoException(JDBC_ERROR, e);
+        }
+    }
+
+    @Override
     public void dropTable(ConnectorSession session, JdbcTableHandle handle)
     {
         verify(handle.getAuthorization().isEmpty(), "Unexpected authorization is required for table: %s".formatted(handle));
@@ -1177,7 +1218,7 @@ public abstract class BaseJdbcClient
     }
 
     @Override
-    public TableStatistics getTableStatistics(ConnectorSession session, JdbcTableHandle handle, TupleDomain<ColumnHandle> tupleDomain)
+    public TableStatistics getTableStatistics(ConnectorSession session, JdbcTableHandle handle)
     {
         verify(handle.getAuthorization().isEmpty(), "Unexpected authorization is required for table: %s".formatted(handle));
         return TableStatistics.empty();
@@ -1433,6 +1474,26 @@ public abstract class BaseJdbcClient
     public OptionalInt getMaxWriteParallelism(ConnectorSession session)
     {
         return OptionalInt.of(getWriteParallelism(session));
+    }
+
+    protected OptionalInt getMaxColumnNameLengthFromDatabaseMetaData(ConnectorSession session)
+    {
+        if (maxColumnNameLength != null) {
+            // According to JavaDoc of DatabaseMetaData#getMaxColumnNameLength a value of 0 signifies that the limit is unknown
+            if (maxColumnNameLength == 0) {
+                return OptionalInt.empty();
+            }
+
+            return OptionalInt.of(maxColumnNameLength);
+        }
+
+        try (Connection connection = connectionFactory.openConnection(session)) {
+            maxColumnNameLength = connection.getMetaData().getMaxColumnNameLength();
+            return OptionalInt.of(maxColumnNameLength);
+        }
+        catch (SQLException e) {
+            throw new TrinoException(JDBC_ERROR, e);
+        }
     }
 
     protected void verifySchemaName(DatabaseMetaData databaseMetadata, String schemaName)

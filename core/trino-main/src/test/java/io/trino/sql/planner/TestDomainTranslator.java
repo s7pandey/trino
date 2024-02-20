@@ -98,12 +98,14 @@ import static io.trino.sql.tree.ComparisonExpression.Operator.LESS_THAN;
 import static io.trino.sql.tree.ComparisonExpression.Operator.LESS_THAN_OR_EQUAL;
 import static io.trino.sql.tree.ComparisonExpression.Operator.NOT_EQUAL;
 import static io.trino.testing.TestingConnectorSession.SESSION;
-import static io.trino.transaction.TransactionBuilder.transaction;
+import static io.trino.testing.TransactionBuilder.transaction;
 import static io.trino.type.ColorType.COLOR;
 import static io.trino.type.LikeFunctions.LIKE_FUNCTION_NAME;
 import static io.trino.type.LikeFunctions.LIKE_PATTERN_FUNCTION_NAME;
 import static java.lang.Float.floatToIntBits;
 import static java.lang.String.format;
+import static java.math.BigDecimal.ONE;
+import static java.math.BigDecimal.TWO;
 import static java.util.Collections.nCopies;
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1194,8 +1196,8 @@ public class TestDomainTranslator
                 C_DECIMAL_21_3,
                 C_DECIMAL_21_3_1,
                 createDecimalType(21, 3),
-                Decimals.encodeScaledValue(new BigDecimal("1"), 3),
-                Decimals.encodeScaledValue(new BigDecimal("2"), 3));
+                Decimals.encodeScaledValue(ONE, 3),
+                Decimals.encodeScaledValue(TWO, 3));
     }
 
     @Test
@@ -1440,7 +1442,7 @@ public class TestDomainTranslator
 
         assertPredicateIsAlwaysFalse(not(new InPredicate(
                 C_BIGINT.toSymbolReference(),
-                new InListExpression(ImmutableList.of(cast(toExpression(null, SMALLINT), BIGINT), toExpression(1L, SMALLINT))))));
+                new InListExpression(ImmutableList.of(cast(toExpression(null, SMALLINT), BIGINT), toExpression(1L, BIGINT))))));
     }
 
     @Test
@@ -1939,12 +1941,12 @@ public class TestDomainTranslator
 
         // non-ASCII prefix
         testSimpleComparison(
-                like(C_VARCHAR, "abc\u0123\ud83d\ude80def\u007e\u007f\u00ff\u0123\uccf0%"),
+                like(C_VARCHAR, "abc\u0123\ud83d\ude80def~\u007f\u00ff\u0123\uccf0%"),
                 C_VARCHAR,
-                like(C_VARCHAR, "abc\u0123\ud83d\ude80def\u007e\u007f\u00ff\u0123\uccf0%"),
+                like(C_VARCHAR, "abc\u0123\ud83d\ude80def~\u007f\u00ff\u0123\uccf0%"),
                 Domain.create(
                         ValueSet.ofRanges(Range.range(varcharType,
-                                utf8Slice("abc\u0123\ud83d\ude80def\u007e\u007f\u00ff\u0123\uccf0"), true,
+                                utf8Slice("abc\u0123\ud83d\ude80def~\u007f\u00ff\u0123\uccf0"), true,
                                 utf8Slice("abc\u0123\ud83d\ude80def\u007f"), false)),
                         false));
 
@@ -1997,12 +1999,12 @@ public class TestDomainTranslator
 
         // non-ASCII
         testSimpleComparison(
-                startsWith(C_VARCHAR, stringLiteral("abc\u0123\ud83d\ude80def\u007e\u007f\u00ff\u0123\uccf0")),
+                startsWith(C_VARCHAR, stringLiteral("abc\u0123\ud83d\ude80def~\u007f\u00ff\u0123\uccf0")),
                 C_VARCHAR,
-                startsWith(C_VARCHAR, stringLiteral("abc\u0123\ud83d\ude80def\u007e\u007f\u00ff\u0123\uccf0")),
+                startsWith(C_VARCHAR, stringLiteral("abc\u0123\ud83d\ude80def~\u007f\u00ff\u0123\uccf0")),
                 Domain.create(
                         ValueSet.ofRanges(Range.range(varcharType,
-                                utf8Slice("abc\u0123\ud83d\ude80def\u007e\u007f\u00ff\u0123\uccf0"), true,
+                                utf8Slice("abc\u0123\ud83d\ude80def~\u007f\u00ff\u0123\uccf0"), true,
                                 utf8Slice("abc\u0123\ud83d\ude80def\u007f"), false)),
                         false));
     }

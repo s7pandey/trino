@@ -60,12 +60,14 @@ public class TestIcebergConfig
                 .setRemoveOrphanFilesMinRetention(new Duration(7, DAYS))
                 .setDeleteSchemaLocationsFallback(false)
                 .setTargetMaxFileSize(DataSize.of(1, GIGABYTE))
+                .setIdleWriterMinFileSize(DataSize.of(16, MEGABYTE))
                 .setMinimumAssignedSplitWeight(0.05)
                 .setHideMaterializedViewStorageTable(true)
                 .setMaterializedViewsStorageSchema(null)
                 .setRegisterTableProcedureEnabled(false)
                 .setSortedWritingEnabled(true)
-                .setQueryPartitionFilterRequired(false));
+                .setQueryPartitionFilterRequired(false)
+                .setSplitManagerThreads(Runtime.getRuntime().availableProcessors() * 2));
     }
 
     @Test
@@ -89,12 +91,14 @@ public class TestIcebergConfig
                 .put("iceberg.remove_orphan_files.min-retention", "14h")
                 .put("iceberg.delete-schema-locations-fallback", "true")
                 .put("iceberg.target-max-file-size", "1MB")
+                .put("iceberg.idle-writer-min-file-size", "1MB")
                 .put("iceberg.minimum-assigned-split-weight", "0.01")
                 .put("iceberg.materialized-views.hide-storage-table", "false")
                 .put("iceberg.materialized-views.storage-schema", "mv_storage_schema")
                 .put("iceberg.register-table-procedure.enabled", "true")
                 .put("iceberg.sorted-writing-enabled", "false")
                 .put("iceberg.query-partition-filter-required", "true")
+                .put("iceberg.split-manager-threads", "42")
                 .buildOrThrow();
 
         IcebergConfig expected = new IcebergConfig()
@@ -115,12 +119,14 @@ public class TestIcebergConfig
                 .setRemoveOrphanFilesMinRetention(new Duration(14, HOURS))
                 .setDeleteSchemaLocationsFallback(true)
                 .setTargetMaxFileSize(DataSize.of(1, MEGABYTE))
+                .setIdleWriterMinFileSize(DataSize.of(1, MEGABYTE))
                 .setMinimumAssignedSplitWeight(0.01)
                 .setHideMaterializedViewStorageTable(false)
                 .setMaterializedViewsStorageSchema("mv_storage_schema")
                 .setRegisterTableProcedureEnabled(true)
                 .setSortedWritingEnabled(false)
-                .setQueryPartitionFilterRequired(true);
+                .setQueryPartitionFilterRequired(true)
+                .setSplitManagerThreads(42);
 
         assertFullMapping(properties, expected);
     }

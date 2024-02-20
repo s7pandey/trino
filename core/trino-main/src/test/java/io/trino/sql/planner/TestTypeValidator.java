@@ -36,8 +36,6 @@ import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.planner.sanity.TypeValidator;
 import io.trino.sql.tree.Cast;
 import io.trino.sql.tree.Expression;
-import io.trino.sql.tree.FrameBound;
-import io.trino.sql.tree.WindowFrame;
 import io.trino.testing.TestingMetadata.TestingColumnHandle;
 import org.junit.jupiter.api.Test;
 
@@ -50,13 +48,14 @@ import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DateType.DATE;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
-import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.analyzer.TypeSignatureProvider.fromTypes;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.trino.sql.planner.TestingPlannerContext.PLANNER_CONTEXT;
-import static io.trino.sql.planner.TypeAnalyzer.createTestingTypeAnalyzer;
 import static io.trino.sql.planner.plan.AggregationNode.singleAggregation;
 import static io.trino.sql.planner.plan.AggregationNode.singleGroupingSet;
+import static io.trino.sql.planner.plan.FrameBoundType.UNBOUNDED_FOLLOWING;
+import static io.trino.sql.planner.plan.FrameBoundType.UNBOUNDED_PRECEDING;
+import static io.trino.sql.planner.plan.WindowFrameType.RANGE;
 import static io.trino.testing.TestingHandles.TEST_TABLE_HANDLE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -137,11 +136,11 @@ public class TestTypeValidator
         ResolvedFunction resolvedFunction = functionResolution.resolveFunction("sum", fromTypes(DOUBLE));
 
         WindowNode.Frame frame = new WindowNode.Frame(
-                WindowFrame.Type.RANGE,
-                FrameBound.Type.UNBOUNDED_PRECEDING,
+                RANGE,
+                UNBOUNDED_PRECEDING,
                 Optional.empty(),
                 Optional.empty(),
-                FrameBound.Type.UNBOUNDED_FOLLOWING,
+                UNBOUNDED_FOLLOWING,
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
@@ -179,19 +178,6 @@ public class TestTypeValidator
                         Optional.empty(),
                         Optional.empty())),
                 singleGroupingSet(ImmutableList.of(columnA, columnB)));
-
-        assertTypesValid(node);
-    }
-
-    @Test
-    public void testValidTypeOnlyCoercion()
-    {
-        Expression expression = new Cast(columnB.toSymbolReference(), toSqlType(BIGINT));
-        Assignments assignments = Assignments.builder()
-                .put(symbolAllocator.newSymbol(expression, BIGINT), expression)
-                .put(symbolAllocator.newSymbol(columnE.toSymbolReference(), VARCHAR), columnE.toSymbolReference()) // implicit coercion from varchar(3) to varchar
-                .build();
-        PlanNode node = new ProjectNode(newId(), baseTableScan, assignments);
 
         assertTypesValid(node);
     }
@@ -266,11 +252,11 @@ public class TestTypeValidator
         ResolvedFunction resolvedFunction = functionResolution.resolveFunction("sum", fromTypes(DOUBLE));
 
         WindowNode.Frame frame = new WindowNode.Frame(
-                WindowFrame.Type.RANGE,
-                FrameBound.Type.UNBOUNDED_PRECEDING,
+                RANGE,
+                UNBOUNDED_PRECEDING,
                 Optional.empty(),
                 Optional.empty(),
-                FrameBound.Type.UNBOUNDED_FOLLOWING,
+                UNBOUNDED_FOLLOWING,
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
@@ -301,11 +287,11 @@ public class TestTypeValidator
         ResolvedFunction resolvedFunction = functionResolution.resolveFunction("sum", fromTypes(DOUBLE));
 
         WindowNode.Frame frame = new WindowNode.Frame(
-                WindowFrame.Type.RANGE,
-                FrameBound.Type.UNBOUNDED_PRECEDING,
+                RANGE,
+                UNBOUNDED_PRECEDING,
                 Optional.empty(),
                 Optional.empty(),
-                FrameBound.Type.UNBOUNDED_FOLLOWING,
+                UNBOUNDED_FOLLOWING,
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
@@ -351,7 +337,7 @@ public class TestTypeValidator
 
     private void assertTypesValid(PlanNode node)
     {
-        TYPE_VALIDATOR.validate(node, TEST_SESSION, PLANNER_CONTEXT, createTestingTypeAnalyzer(PLANNER_CONTEXT), symbolAllocator.getTypes(), WarningCollector.NOOP);
+        TYPE_VALIDATOR.validate(node, TEST_SESSION, PLANNER_CONTEXT, new IrTypeAnalyzer(PLANNER_CONTEXT), symbolAllocator.getTypes(), WarningCollector.NOOP);
     }
 
     private static PlanNodeId newId()

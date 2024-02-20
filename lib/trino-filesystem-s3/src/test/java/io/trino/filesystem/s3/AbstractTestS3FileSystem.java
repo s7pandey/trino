@@ -82,19 +82,13 @@ public abstract class AbstractTestS3FileSystem
     }
 
     @Override
-    protected final boolean supportsCreateExclusive()
+    protected boolean isCreateExclusive()
     {
         return false;
     }
 
     @Override
     protected final boolean supportsRenameFile()
-    {
-        return false;
-    }
-
-    @Override
-    protected final boolean deleteFileFailsIfNotExists()
     {
         return false;
     }
@@ -189,6 +183,7 @@ public abstract class AbstractTestS3FileSystem
                 assertThat(fileSystem.listDirectories(getRootLocation())).containsExactly(data);
                 assertThat(fileSystem.listDirectories(data)).containsExactly(data.appendPath("file/"));
 
+                // blobs ending in slash are invisible to S3FileSystem and will not be deleted
                 fileSystem.deleteDirectory(data);
                 assertThat(fileSystem.listDirectories(getRootLocation())).containsExactly(data);
 

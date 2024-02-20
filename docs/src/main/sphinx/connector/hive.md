@@ -14,8 +14,6 @@ Amazon S3 <hive-s3>
 Azure Storage <hive-azure>
 Google Cloud Storage <hive-gcs-tutorial>
 IBM Cloud Object Storage <hive-cos>
-Storage Caching <hive-caching>
-Alluxio <hive-alluxio>
 Object storage file formats <object-storage-file-formats>
 ```
 
@@ -342,16 +340,20 @@ Hive connector documentation.
   - `false`
 :::
 
-## Storage
+(hive-file-system-configuration)=
+### File system access configuration
 
-The Hive connector supports the following storage options:
+The connector supports native, high-performance file system access to object
+storage systems:
 
-- {doc}`Amazon S3 <hive-s3>`
-- {doc}`Azure Storage <hive-azure>`
-- {doc}`Google Cloud Storage <hive-gcs-tutorial>`
-- {doc}`IBM Cloud Object Storage <hive-cos>`
+* [](/object-storage)
+* [](/object-storage/file-system-azure)
+* [](/object-storage/file-system-gcs)
+* [](/object-storage/file-system-s3)
 
-The Hive connector also supports {doc}`storage caching <hive-caching>`.
+You must enable and configure the specific native file system access. If none is
+activated, the [legacy support](file-system-legacy) is used and must be
+configured.
 
 ## Security
 
@@ -639,18 +641,18 @@ type conversions.
 * - `BOOLEAN`
   - `VARCHAR`
 * - `VARCHAR`
-  - `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, `DOUBLE`, `TIMESTAMP`, `DATE`, as well as
+  - `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, `REAL`, `DOUBLE`, `TIMESTAMP`, `DATE`, `CHAR` as well as
     narrowing conversions for `VARCHAR`
 * - `CHAR`
   - narrowing conversions for `CHAR`
 * - `TINYINT`
-  - `VARCHAR`, `SMALLINT`, `INTEGER`, `BIGINT`, `DOUBLE`
+  - `VARCHAR`, `SMALLINT`, `INTEGER`, `BIGINT`, `DOUBLE`, `DECIMAL`
 * - `SMALLINT`
-  - `VARCHAR`, `INTEGER`, `BIGINT`, `DOUBLE`
+  - `VARCHAR`, `INTEGER`, `BIGINT`, `DOUBLE`, `DECIMAL`
 * - `INTEGER`
-  - `VARCHAR`, `BIGINT`, `DOUBLE`
+  - `VARCHAR`, `BIGINT`, `DOUBLE`, `DECIMAL`
 * - `BIGINT`
-  - `VARCHAR`, `DOUBLE`
+  - `VARCHAR`, `DOUBLE`, `DECIMAL`
 * - `REAL`
   - `DOUBLE`, `DECIMAL`
 * - `DOUBLE`
@@ -658,6 +660,8 @@ type conversions.
 * - `DECIMAL`
   - `DOUBLE`, `REAL`, `VARCHAR`, `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, as
     well as narrowing and widening conversions for `DECIMAL`
+* - `DATE`
+  - `VARCHAR`
 * - `TIMESTAMP`
   - `VARCHAR`, `DATE`
 :::
@@ -909,9 +913,9 @@ SELECT * FROM example.web."page_views$properties";
 ```
 
 ```text
-       stats_generated_via_stats_task        | auto.purge |       presto_query_id       | presto_version | transactional
----------------------------------------------+------------+-----------------------------+----------------+---------------
- workaround for potential lack of HIVE-12730 | false      | 20230705_152456_00001_nfugi | 423            | false
+       stats_generated_via_stats_task        | auto.purge |       trino_query_id       | trino_version | transactional
+---------------------------------------------+------------+-----------------------------+---------------+---------------
+ workaround for potential lack of HIVE-12730 | false      | 20230705_152456_00001_nfugi | 434           | false
 ```
 
 ##### `$partitions` table
@@ -1280,6 +1284,11 @@ and Delta Lake tables with the following catalog configuration properties:
 
 - `hive.iceberg-catalog-name` for redirecting the query to {doc}`/connector/iceberg`
 - `hive.delta-lake-catalog-name` for redirecting the query to {doc}`/connector/delta-lake`
+
+### Filesystem cache
+
+The connector supports configuring and using [filesystem
+caching](/object-storage/file-system-cache).
 
 (hive-performance-tuning-configuration)=
 

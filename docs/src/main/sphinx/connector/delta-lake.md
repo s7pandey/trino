@@ -21,9 +21,8 @@ To connect to Databricks Delta Lake, you need:
   or a Glue metastore.
 - Network access to the HMS from the coordinator and workers. Port 9083 is the
   default port for the Thrift protocol used by the HMS.
-- Data files stored in the Parquet file format. These can be configured using
-  {ref}`file format configuration properties <hive-parquet-configuration>` per
-  catalog.
+- Data files stored in the [Parquet file format](hive-parquet-configuration) on
+  a [supported file system](delta-lake-file-system-configuration).
 
 ## General configuration
 
@@ -53,12 +52,20 @@ The connector recognizes Delta Lake tables created in the metastore by the Datab
 runtime. If non-Delta Lake tables are present in the metastore as well, they are not
 visible to the connector.
 
-To configure access to S3 and S3-compatible storage, Azure storage, and others,
-consult the appropriate section of the Hive documentation:
+(delta-lake-file-system-configuration)=
+## File system access configuration
 
-- {doc}`Amazon S3 </connector/hive-s3>`
-- {doc}`Azure storage documentation </connector/hive-azure>`
-- {ref}`GCS <hive-google-cloud-storage-configuration>`
+The connector supports native, high-performance file system access to object
+storage systems:
+
+* [](/object-storage)
+* [](/object-storage/file-system-azure)
+* [](/object-storage/file-system-gcs)
+* [](/object-storage/file-system-s3)
+
+You must enable and configure the specific native file system access. If none is
+activated, the [legacy support](file-system-legacy) is used and must be
+configured.
 
 ### Delta Lake general configuration properties
 
@@ -125,7 +132,9 @@ values. Typical usage does not require you to configure them.
   - Enable writing row statistics to checkpoint files.
   - `true`
 * - ``delta.checkpoint-filtering.enabled``
-  - Enable partition pruning when reading checkpoint files.
+  - Enable pruning of data file entries as well as data file statistics
+    columns which are irrelevant for the query when reading Delta Lake
+    checkpoint files.
     The equivalent catalog session property is ``checkpoint_filtering_enabled``.
   - ``false``
 * - `delta.dynamic-filtering.wait-timeout`
@@ -197,6 +206,9 @@ The following table describes {ref}`catalog session properties
 * - `parquet_writer_page_size`
   - The maximum page size created by the Parquet writer.
   - `1MB`
+* - `parquet_writer_page_value_count`
+  - The maximum value count of pages created by the Parquet writer.
+  - `60000`
 * - `parquet_writer_batch_size`
   - Maximum number of rows processed by the Parquet writer in a batch.
   - `10000`
@@ -514,27 +526,16 @@ When Delta Lake tables exist in storage but not in the metastore, Trino can be
 used to register the tables:
 
 ```
-CREATE TABLE example.default.example_table (
-  dummy BIGINT
-)
-WITH (
-  location = '...'
-)
+CALL example.system.register_table(schema_name => 'testdb', table_name => 'example_table', table_location => 's3://my-bucket/a/path')
 ```
 
-Columns listed in the DDL, such as `dummy` in the preceding example, are
-ignored. The table schema is read from the transaction log instead. If the
+The table schema is read from the transaction log instead. If the
 schema is changed by an external system, Trino automatically uses the new
 schema.
 
 :::{warning}
-Using `CREATE TABLE` with an existing table content is deprecated, instead
-use the `system.register_table` procedure. The `CREATE TABLE ... WITH
-(location=...)` syntax can be temporarily re-enabled using the
-`delta.legacy-create-table-with-existing-location.enabled` catalog
-configuration property or
-`legacy_create_table_with_existing_location_enabled` catalog session
-property.
+Using ``CREATE TABLE`` with an existing table content is disallowed,
+use the ``system.register_table`` procedure instead.
 :::
 
 If the specified location does not already contain a Delta table, the connector
@@ -552,6 +553,7 @@ TABLE AS </sql/create-table-as>` syntax.
 
 The connector supports the following [](/sql/alter-table) statements.
 
+(delta-lake-alter-table-execute)=
 #### ALTER TABLE EXECUTE
 
 The connector supports the following commands for use with {ref}`ALTER TABLE
@@ -1085,3 +1087,8 @@ keep a backup of the original values if you change them.
     catalog specific use.
   - `false`
 :::
+
+### File system cache
+
+The connector supports configuring and using [file system
+caching](/object-storage/file-system-cache).

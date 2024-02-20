@@ -31,8 +31,6 @@ import io.trino.plugin.hive.metastore.SortingColumn.Order;
 import io.trino.plugin.hive.metastore.Storage;
 import io.trino.plugin.hive.metastore.StorageFormat;
 import io.trino.plugin.hive.metastore.Table;
-import io.trino.plugin.hive.util.HiveBucketing;
-import io.trino.plugin.hive.util.HiveBucketing.BucketingVersion;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.function.LanguageFunction;
@@ -162,25 +160,25 @@ public final class GlueToTrinoConverter
                 throw new TrinoException(HIVE_UNSUPPORTED_FORMAT, "Table StorageDescriptor is null for table '%s' %s".formatted(table, glueTable));
             }
             boolean isCsv = sd.getSerdeInfo() != null && HiveStorageFormat.CSV.getSerde().equals(sd.getSerdeInfo().getSerializationLibrary());
-            tableBuilder.setDataColumns(convertColumns(table, sd.getColumns(), isCsv));
+            tableBuilder.setDataColumns(convertColumns(table, sd.getColumns(), ColumnType.DATA, isCsv));
             if (glueTable.getPartitionKeys() != null) {
-                tableBuilder.setPartitionColumns(convertColumns(table, glueTable.getPartitionKeys(), isCsv));
+                tableBuilder.setPartitionColumns(convertColumns(table, glueTable.getPartitionKeys(), ColumnType.PARTITION, isCsv));
             }
             else {
                 tableBuilder.setPartitionColumns(ImmutableList.of());
             }
             // No benefit to memoizing here, just reusing the implementation
-            new StorageConverter().setStorageBuilder(sd, tableBuilder.getStorageBuilder(), tableParameters);
+            new StorageConverter().setStorageBuilder(sd, tableBuilder.getStorageBuilder());
         }
 
         return tableBuilder.build();
     }
 
-    private static Column convertColumn(SchemaTableName table, com.amazonaws.services.glue.model.Column glueColumn, boolean isCsv)
+    private static Column convertColumn(SchemaTableName table, com.amazonaws.services.glue.model.Column glueColumn, ColumnType columnType, boolean isCsv)
     {
         // OpenCSVSerde deserializes columns from csv file into strings, so we set the column type from the metastore
         // to string to avoid cast exceptions.
-        if (isCsv) {
+        if (columnType == ColumnType.DATA && isCsv) {
             //TODO(https://github.com/trinodb/trino/issues/7240) Add tests
             return new Column(glueColumn.getName(), HiveType.HIVE_STRING, Optional.ofNullable(glueColumn.getComment()), getColumnParameters(glueColumn));
         }
@@ -197,9 +195,9 @@ public final class GlueToTrinoConverter
         }
     }
 
-    private static List<Column> convertColumns(SchemaTableName table, List<com.amazonaws.services.glue.model.Column> glueColumns, boolean isCsv)
+    private static List<Column> convertColumns(SchemaTableName table, List<com.amazonaws.services.glue.model.Column> glueColumns, ColumnType columnType, boolean isCsv)
     {
-        return mappedCopy(glueColumns, glueColumn -> convertColumn(table, glueColumn, isCsv));
+        return mappedCopy(glueColumns, glueColumn -> convertColumn(table, glueColumn, columnType, isCsv));
     }
 
     private static Function<Map<String, String>, Map<String, String>> parametersConverter()
@@ -215,20 +213,17 @@ public final class GlueToTrinoConverter
     public static final class GluePartitionConverter
             implements Function<com.amazonaws.services.glue.model.Partition, Partition>
     {
-        private final BiFunction<List<com.amazonaws.services.glue.model.Column>, Boolean, List<Column>> columnsConverter;
+        private final BiFunction<List<com.amazonaws.services.glue.model.Column>, Boolean, List<Column>> dataColumnsConverter;
         private final Function<Map<String, String>, Map<String, String>> parametersConverter = parametersConverter();
         private final StorageConverter storageConverter = new StorageConverter();
         private final String databaseName;
         private final String tableName;
-        private final Map<String, String> tableParameters;
 
-        public GluePartitionConverter(Table table)
+        public GluePartitionConverter(String databaseName, String tableName)
         {
-            requireNonNull(table, "table is null");
-            this.databaseName = requireNonNull(table.getDatabaseName(), "databaseName is null");
-            this.tableName = requireNonNull(table.getTableName(), "tableName is null");
-            this.tableParameters = table.getParameters();
-            this.columnsConverter = memoizeLast((glueColumns, isCsv) -> convertColumns(table.getSchemaTableName(), glueColumns, isCsv));
+            this.databaseName = requireNonNull(databaseName, "databaseName is null");
+            this.tableName = requireNonNull(tableName, "tableName is null");
+            this.dataColumnsConverter = memoizeLast((glueColumns, isCsv) -> convertColumns(new SchemaTableName(databaseName, tableName), glueColumns, ColumnType.DATA, isCsv));
         }
 
         @Override
@@ -248,10 +243,10 @@ public final class GlueToTrinoConverter
                     .setDatabaseName(databaseName)
                     .setTableName(tableName)
                     .setValues(gluePartition.getValues()) // No memoization benefit
-                    .setColumns(columnsConverter.apply(sd.getColumns(), isCsv))
+                    .setColumns(dataColumnsConverter.apply(sd.getColumns(), isCsv))
                     .setParameters(parametersConverter.apply(getPartitionParameters(gluePartition)));
 
-            storageConverter.setStorageBuilder(sd, partitionBuilder.getStorageBuilder(), tableParameters);
+            storageConverter.setStorageBuilder(sd, partitionBuilder.getStorageBuilder());
 
             return partitionBuilder.build();
         }
@@ -265,20 +260,20 @@ public final class GlueToTrinoConverter
         private final Function<Map<String, String>, Map<String, String>> serdeParametersConverter = parametersConverter();
         private final StorageFormatConverter storageFormatConverter = new StorageFormatConverter();
 
-        public void setStorageBuilder(StorageDescriptor sd, Storage.Builder storageBuilder, Map<String, String> tableParameters)
+        public void setStorageBuilder(StorageDescriptor sd, Storage.Builder storageBuilder)
         {
             requireNonNull(sd.getSerdeInfo(), "StorageDescriptor SerDeInfo is null");
             SerDeInfo serdeInfo = sd.getSerdeInfo();
 
             storageBuilder.setStorageFormat(storageFormatConverter.createStorageFormat(serdeInfo, sd))
                     .setLocation(nullToEmpty(sd.getLocation()))
-                    .setBucketProperty(convertToBucketProperty(tableParameters, sd))
+                    .setBucketProperty(convertToBucketProperty(sd))
                     .setSkewed(sd.getSkewedInfo() != null && !isNullOrEmpty(sd.getSkewedInfo().getSkewedColumnNames()))
                     .setSerdeParameters(serdeParametersConverter.apply(getSerDeInfoParameters(serdeInfo)))
                     .build();
         }
 
-        private Optional<HiveBucketProperty> convertToBucketProperty(Map<String, String> tableParameters, StorageDescriptor sd)
+        private Optional<HiveBucketProperty> convertToBucketProperty(StorageDescriptor sd)
         {
             if (sd.getNumberOfBuckets() > 0) {
                 if (isNullOrEmpty(sd.getBucketColumns())) {
@@ -286,8 +281,7 @@ public final class GlueToTrinoConverter
                 }
                 List<String> bucketColumns = this.bucketColumns.apply(sd.getBucketColumns());
                 List<SortingColumn> sortedBy = this.sortColumns.apply(sd.getSortColumns());
-                BucketingVersion bucketingVersion = HiveBucketing.getBucketingVersion(tableParameters);
-                return bucketProperty.apply(Optional.of(new HiveBucketProperty(bucketColumns, bucketingVersion, sd.getNumberOfBuckets(), sortedBy)));
+                return bucketProperty.apply(Optional.of(new HiveBucketProperty(bucketColumns, sd.getNumberOfBuckets(), sortedBy)));
             }
             return Optional.empty();
         }
@@ -346,5 +340,11 @@ public final class GlueToTrinoConverter
             builder.add(mapper.apply(item));
         }
         return builder.build();
+    }
+
+    private enum ColumnType
+    {
+        DATA,
+        PARTITION,
     }
 }

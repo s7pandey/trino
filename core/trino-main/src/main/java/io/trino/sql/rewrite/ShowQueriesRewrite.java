@@ -17,7 +17,6 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedMap;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
@@ -72,6 +71,7 @@ import io.trino.sql.tree.DoubleLiteral;
 import io.trino.sql.tree.Explain;
 import io.trino.sql.tree.ExplainAnalyze;
 import io.trino.sql.tree.Expression;
+import io.trino.sql.tree.GrantObject;
 import io.trino.sql.tree.Identifier;
 import io.trino.sql.tree.LikePredicate;
 import io.trino.sql.tree.LongLiteral;
@@ -283,7 +283,7 @@ public final class ShowQueriesRewrite
             accessControl.checkCanShowTables(session.toSecurityContext(), schema);
 
             if (!metadata.catalogExists(session, schema.getCatalogName())) {
-                throw semanticException(CATALOG_NOT_FOUND, showTables, "Catalog '%s' does not exist", schema.getCatalogName());
+                throw semanticException(CATALOG_NOT_FOUND, showTables, "Catalog '%s' not found", schema.getCatalogName());
             }
 
             if (!metadata.schemaExists(session, schema)) {
@@ -314,7 +314,8 @@ public final class ShowQueriesRewrite
             String catalogName = session.getCatalog().orElse(null);
             Optional<Expression> predicate = Optional.empty();
 
-            Optional<QualifiedName> tableName = showGrants.getTableName();
+            // TODO: Should this handle any entityKind?
+            Optional<QualifiedName> tableName = showGrants.getGrantObject().map(GrantObject::getName);
             if (tableName.isPresent()) {
                 QualifiedObjectName qualifiedTableName = createQualifiedObjectName(session, showGrants, tableName.get());
                 if (!metadata.isView(session, qualifiedTableName)) {
@@ -599,14 +600,14 @@ public final class ShowQueriesRewrite
                 }
 
                 Query query = parseView(viewDefinition.get().getOriginalSql(), objectName, node);
-                List<Identifier> parts = Lists.reverse(node.getName().getOriginalParts());
+                List<Identifier> parts = node.getName().getOriginalParts().reversed();
                 Identifier tableName = parts.get(0);
                 Identifier schemaName = (parts.size() > 1) ? parts.get(1) : new Identifier(objectName.getSchemaName());
                 Identifier catalogName = (parts.size() > 2) ? parts.get(2) : new Identifier(objectName.getCatalogName());
 
                 accessControl.checkCanShowCreateTable(session.toSecurityContext(), new QualifiedObjectName(catalogName.getValue(), schemaName.getValue(), tableName.getValue()));
 
-                Map<String, Object> properties = viewDefinition.get().getProperties();
+                Map<String, Object> properties = metadata.getMaterializedViewProperties(session, objectName, viewDefinition.get());
                 CatalogHandle catalogHandle = getRequiredCatalogHandle(metadata, session, node, catalogName.getValue());
                 Collection<PropertyMetadata<?>> allMaterializedViewProperties = materializedViewPropertyManager.getAllProperties(catalogHandle);
                 List<Property> propertyNodes = buildProperties(objectName, Optional.empty(), INVALID_MATERIALIZED_VIEW_PROPERTY, properties, allMaterializedViewProperties);
@@ -640,7 +641,7 @@ public final class ShowQueriesRewrite
                 }
 
                 Query query = parseView(viewDefinition.get().getOriginalSql(), objectName, node);
-                List<Identifier> parts = Lists.reverse(node.getName().getOriginalParts());
+                List<Identifier> parts = node.getName().getOriginalParts().reversed();
                 Identifier tableName = parts.get(0);
                 Identifier schemaName = (parts.size() > 1) ? parts.get(1) : new Identifier(objectName.getSchemaName());
                 Identifier catalogName = (parts.size() > 2) ? parts.get(2) : new Identifier(objectName.getCatalogName());

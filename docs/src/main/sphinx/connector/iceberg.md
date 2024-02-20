@@ -40,11 +40,9 @@ To use Iceberg, you need:
   <iceberg-jdbc-catalog>`, a {ref}`REST catalog <iceberg-rest-catalog>`, or a
   {ref}`Nessie server <iceberg-nessie-catalog>`.
 
-- Data files stored in a supported file format. These can be configured using
-  file format configuration properties per catalog:
-
-  - {ref}`ORC <hive-orc-configuration>`
-  - {ref}`Parquet <hive-parquet-configuration>` (default)
+- Data files stored in the file formats {ref}`ORC <hive-orc-configuration>` or
+  {ref}`Parquet <hive-parquet-configuration>` (default) on a [supported file
+  system](iceberg-file-system-configuration).
 
 ## General configuration
 
@@ -159,6 +157,10 @@ implementation is used:
     materialized view definition. When the `storage_schema` materialized view
     property is specified, it takes precedence over this catalog property.
   - Empty
+* - `iceberg.materialized-views.hide-storage-table`
+  - Hide the information about the storage table backing the materialized view
+    in the metastore.
+  - `true`
 * - `iceberg.register-table-procedure.enabled`
   - Enable to allow user to call `register_table` procedure.
   - `false`
@@ -168,6 +170,21 @@ implementation is used:
     catalog specific use.
   - `false`
 :::
+
+(iceberg-file-system-configuration)=
+## File system access configuration
+
+The connector supports native, high-performance file system access to object
+storage systems:
+
+* [](/object-storage)
+* [](/object-storage/file-system-azure)
+* [](/object-storage/file-system-gcs)
+* [](/object-storage/file-system-s3)
+
+You must enable and configure the specific native file system access. If none is
+activated, the [legacy support](file-system-legacy) is used and must be
+configured.
 
 ## Type mapping
 
@@ -285,12 +302,17 @@ No other types are supported.
 
 ## Security
 
-The Iceberg connector allows you to choose one of several means of providing
-authorization at the catalog level.
+### Kerberos authentication
+
+The Iceberg connector supports Kerberos authentication for the Hive metastore
+and HDFS and is configured using the same parameters as the Hive connector. Find
+more information in the [](/connector/hive-security) section.
 
 (iceberg-authorization)=
+### Authorization
 
-### Authorization checks
+The Iceberg connector allows you to choose one of several means of providing
+authorization at the catalog level.
 
 You can enable authorization checks for the connector by setting the
 `iceberg.security` property in the catalog properties file. This property must
@@ -318,7 +340,6 @@ be one of the following values:
 :::
 
 (iceberg-sql-support)=
-
 ## SQL support
 
 This connector provides read access and write access to data and metadata in
@@ -1140,7 +1161,7 @@ Retrieve all records that belong to a specific file using
 ```
 SELECT *
 FROM example.web.page_views
-WHERE "$file_modified_time" = CAST('2022-07-01 01:02:03.456 UTC' AS TIMESTAMP WIOTH TIMEZONE)
+WHERE "$file_modified_time" = CAST('2022-07-01 01:02:03.456 UTC' AS TIMESTAMP WITH TIME ZONE)
 ```
 
 #### DROP TABLE
@@ -1407,13 +1428,8 @@ CREATE TABLE example_table (
 When trying to insert/update data in the table, the query fails if trying to set
 `NULL` value on a column having the `NOT NULL` constraint.
 
-### View management
-
-Trino allows reading from Iceberg materialized views.
-
 (iceberg-materialized-views)=
-
-#### Materialized views
+### Materialized views
 
 The Iceberg connector supports {ref}`sql-materialized-view-management`. In the
 underlying system, each materialized view consists of a view definition and an
@@ -1424,7 +1440,7 @@ You can use the {ref}`iceberg-table-properties` to control the created storage
 table and therefore the layout and performance. For example, you can use the
 following clause with {doc}`/sql/create-materialized-view` to use the ORC format
 for the data files and partition the storage per day using the column
-`_date`:
+`event_date`:
 
 ```
 WITH ( format = 'ORC', partitioning = ARRAY['event_date'] )
@@ -1515,3 +1531,8 @@ before re-analyzing.
 
 The connector supports redirection from Iceberg tables to Hive tables with the
 `iceberg.hive-catalog-name` catalog configuration property.
+
+### Filesystem cache
+
+The connector supports configuring and using
+[](/object-storage/file-system-cache).

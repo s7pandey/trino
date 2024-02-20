@@ -36,6 +36,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.Timeout;
 
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CyclicBarrier;
@@ -44,6 +45,7 @@ import java.util.concurrent.Future;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.airlift.concurrent.MoreFutures.tryGetFutureValue;
 import static io.trino.plugin.iceberg.IcebergTestUtils.getFileSystemFactory;
@@ -53,7 +55,7 @@ import static io.trino.testing.TestingAccessControlManager.privilege;
 import static io.trino.testing.TestingConnectorSession.SESSION;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static java.lang.String.format;
-import static java.time.format.DateTimeFormatter.ISO_INSTANT;
+import static java.time.ZoneOffset.UTC;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newFixedThreadPool;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -131,7 +133,7 @@ public abstract class BaseIcebergConnectorSmokeTest
         ExecutorService executor = newFixedThreadPool(threads);
         List<String> rows = ImmutableList.of("(1, 0, 0, 0)", "(0, 1, 0, 0)", "(0, 0, 1, 0)", "(0, 0, 0, 1)");
 
-        String[] expectedErrors = new String[]{"Failed to commit Iceberg update to table:", "Failed to replace table due to concurrent updates:"};
+        String[] expectedErrors = new String[] {"Failed to commit Iceberg update to table:", "Failed to replace table due to concurrent updates:"};
         try (TestTable table = new TestTable(
                 getQueryRunner()::execute,
                 "test_concurrent_delete",
@@ -155,7 +157,9 @@ public abstract class BaseIcebergConnectorSmokeTest
                     .collect(toImmutableList());
 
             Stream<Optional<String>> expectedRows = Streams.mapWithIndex(futures.stream(), (future, index) -> {
-                boolean deleteSuccessful = tryGetFutureValue(future, 10, SECONDS).orElseThrow();
+                Optional<Boolean> value = tryGetFutureValue(future, 20, SECONDS);
+                checkState(value.isPresent(), "Task %s did not complete in time", index);
+                boolean deleteSuccessful = value.get();
                 return deleteSuccessful ? Optional.empty() : Optional.of(rows.get((int) index));
             });
             List<String> expectedValues = expectedRows.filter(Optional::isPresent).map(Optional::get).collect(toImmutableList());
@@ -727,6 +731,8 @@ public abstract class BaseIcebergConnectorSmokeTest
     @Test
     public void testTableChangesFunction()
     {
+        DateTimeFormatter instantMillisFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSVV").withZone(UTC);
+
         try (TestTable table = new TestTable(
                 getQueryRunner()::execute,
                 "test_table_changes_function_",
@@ -734,7 +740,7 @@ public abstract class BaseIcebergConnectorSmokeTest
             long initialSnapshot = getMostRecentSnapshotId(table.getName());
             assertUpdate("INSERT INTO " + table.getName() + " SELECT nationkey, name FROM nation", 25);
             long snapshotAfterInsert = getMostRecentSnapshotId(table.getName());
-            String snapshotAfterInsertTime = getSnapshotTime(table.getName(), snapshotAfterInsert).format(ISO_INSTANT);
+            String snapshotAfterInsertTime = getSnapshotTime(table.getName(), snapshotAfterInsert).format(instantMillisFormatter);
 
             assertQuery(
                     "SELECT nationkey, name, _change_type, _change_version_id, to_iso8601(_change_timestamp), _change_ordinal " +
@@ -743,7 +749,7 @@ public abstract class BaseIcebergConnectorSmokeTest
 
             assertUpdate("DELETE FROM " + table.getName(), 25);
             long snapshotAfterDelete = getMostRecentSnapshotId(table.getName());
-            String snapshotAfterDeleteTime = getSnapshotTime(table.getName(), snapshotAfterDelete).format(ISO_INSTANT);
+            String snapshotAfterDeleteTime = getSnapshotTime(table.getName(), snapshotAfterDelete).format(instantMillisFormatter);
 
             assertQuery(
                     "SELECT nationkey, name, _change_type, _change_version_id, to_iso8601(_change_timestamp), _change_ordinal " +

@@ -62,10 +62,12 @@ public final class HiveCoercionPolicy
         Type toType = typeManager.getType(toHiveType.getTypeSignature(hiveTimestampPrecision));
         if (fromType instanceof VarcharType) {
             return toType instanceof VarcharType ||
+                    toType instanceof CharType ||
                     toHiveType.equals(HIVE_BYTE) ||
                     toHiveType.equals(HIVE_SHORT) ||
                     toHiveType.equals(HIVE_INT) ||
                     toHiveType.equals(HIVE_LONG) ||
+                    toHiveType.equals(HIVE_FLOAT) ||
                     toHiveType.equals(HIVE_DOUBLE) ||
                     toHiveType.equals(HIVE_DATE) ||
                     toHiveType.equals(HIVE_TIMESTAMP);
@@ -81,22 +83,23 @@ public final class HiveCoercionPolicy
                     fromHiveType.equals(HIVE_LONG) ||
                     fromHiveType.equals(HIVE_TIMESTAMP) ||
                     fromHiveType.equals(HIVE_DOUBLE) ||
+                    fromHiveType.equals(HIVE_DATE) ||
                     fromType instanceof DecimalType;
         }
         if (toHiveType.equals(HIVE_DATE)) {
             return fromHiveType.equals(HIVE_TIMESTAMP);
         }
         if (fromHiveType.equals(HIVE_BYTE)) {
-            return toHiveType.equals(HIVE_SHORT) || toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE);
+            return toHiveType.equals(HIVE_SHORT) || toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE) || toType instanceof DecimalType;
         }
         if (fromHiveType.equals(HIVE_SHORT)) {
-            return toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE);
+            return toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE) || toType instanceof DecimalType;
         }
         if (fromHiveType.equals(HIVE_INT)) {
-            return toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE);
+            return toHiveType.equals(HIVE_LONG) || toHiveType.equals(HIVE_DOUBLE) || toType instanceof DecimalType;
         }
         if (fromHiveType.equals(HIVE_LONG)) {
-            return toHiveType.equals(HIVE_DOUBLE);
+            return toHiveType.equals(HIVE_DOUBLE) || toType instanceof DecimalType;
         }
         if (fromHiveType.equals(HIVE_FLOAT)) {
             return toHiveType.equals(HIVE_DOUBLE) || toType instanceof DecimalType;

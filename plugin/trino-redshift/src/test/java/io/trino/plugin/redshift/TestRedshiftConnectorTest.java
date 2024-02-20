@@ -74,6 +74,7 @@ public class TestRedshiftConnectorTest
                     SUPPORTS_AGGREGATION_PUSHDOWN_REGRESSION,
                     SUPPORTS_ARRAY,
                     SUPPORTS_CREATE_TABLE_WITH_COLUMN_COMMENT,
+                    SUPPORTS_DROP_NOT_NULL_CONSTRAINT,
                     SUPPORTS_DROP_SCHEMA_CASCADE,
                     SUPPORTS_JOIN_PUSHDOWN_WITH_DISTINCT_FROM,
                     SUPPORTS_JOIN_PUSHDOWN_WITH_FULL_JOIN,
@@ -551,8 +552,8 @@ public class TestRedshiftConnectorTest
                         .mapTo(Long.class)
                         .findOne();
 
-                // 10 means AUTO(ALL) and 11 means AUTO(EVEN). See https://docs.aws.amazon.com/redshift/latest/dg/r_PG_CLASS_INFO.html.
-                return currentDistStyle.isPresent() && (currentDistStyle.get() == 10 || currentDistStyle.get() == 11);
+                // 10 means AUTO(ALL), 11 means AUTO(EVEN) and 12 means AUTO(KEY). See https://docs.aws.amazon.com/redshift/latest/dg/r_PG_CLASS_INFO.html.
+                return currentDistStyle.isPresent() && (currentDistStyle.get() == 10 || currentDistStyle.get() == 11 || currentDistStyle.get() == 12);
             });
             if (!isDistStyleAuto) {
                 executeInRedshift("ALTER TABLE " + destTableName + " ALTER DISTSTYLE " + distStyle);

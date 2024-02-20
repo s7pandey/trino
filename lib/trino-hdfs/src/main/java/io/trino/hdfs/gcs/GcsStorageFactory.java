@@ -18,9 +18,9 @@ import com.google.cloud.hadoop.repackaged.gcs.com.google.api.client.http.HttpTra
 import com.google.cloud.hadoop.repackaged.gcs.com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.cloud.hadoop.repackaged.gcs.com.google.api.services.storage.Storage;
 import com.google.cloud.hadoop.repackaged.gcs.com.google.cloud.hadoop.gcsio.GoogleCloudStorageOptions;
-import com.google.cloud.hadoop.repackaged.gcs.com.google.cloud.hadoop.util.CredentialFactory;
 import com.google.cloud.hadoop.repackaged.gcs.com.google.cloud.hadoop.util.HttpTransportFactory;
 import com.google.cloud.hadoop.repackaged.gcs.com.google.cloud.hadoop.util.RetryHttpInitializer;
+import com.google.cloud.hadoop.repackaged.gcs.com.google.cloud.hadoop.util.RetryHttpInitializerOptions;
 import com.google.inject.Inject;
 import io.trino.hdfs.HdfsContext;
 import io.trino.hdfs.HdfsEnvironment;
@@ -35,6 +35,7 @@ import java.time.Duration;
 import java.util.Optional;
 
 import static com.google.cloud.hadoop.fs.gcs.TrinoGoogleHadoopFileSystemConfiguration.getGcsOptionsBuilder;
+import static com.google.cloud.hadoop.repackaged.gcs.com.google.cloud.hadoop.util.CredentialFactory.DEFAULT_SCOPES;
 import static com.google.common.base.Strings.nullToEmpty;
 import static io.trino.hdfs.gcs.GcsConfigurationProvider.GCS_OAUTH_KEY;
 import static io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
@@ -58,12 +59,12 @@ public class GcsStorageFactory
         String jsonKeyFilePath = hiveGcsConfig.getJsonKeyFilePath();
         if (jsonKey != null) {
             try (InputStream inputStream = new ByteArrayInputStream(jsonKey.getBytes(UTF_8))) {
-                jsonGoogleCredential = Optional.of(GoogleCredential.fromStream(inputStream).createScoped(CredentialFactory.DEFAULT_SCOPES));
+                jsonGoogleCredential = Optional.of(GoogleCredential.fromStream(inputStream).createScoped(DEFAULT_SCOPES));
             }
         }
         else if (jsonKeyFilePath != null) {
             try (FileInputStream inputStream = new FileInputStream(jsonKeyFilePath)) {
-                jsonGoogleCredential = Optional.of(GoogleCredential.fromStream(inputStream).createScoped(CredentialFactory.DEFAULT_SCOPES));
+                jsonGoogleCredential = Optional.of(GoogleCredential.fromStream(inputStream).createScoped(DEFAULT_SCOPES));
             }
         }
         else {
@@ -79,19 +80,21 @@ public class GcsStorageFactory
                     gcsOptions.getTransportType(),
                     gcsOptions.getProxyAddress(),
                     gcsOptions.getProxyUsername(),
-                    gcsOptions.getProxyPassword(),
-                    Duration.ofMillis(gcsOptions.getHttpRequestReadTimeout()));
+                    gcsOptions.getProxyPassword());
             GoogleCredential credential;
             if (useGcsAccessToken) {
                 String accessToken = nullToEmpty(context.getIdentity().getExtraCredentials().get(GCS_OAUTH_KEY));
                 try (ByteArrayInputStream inputStream = new ByteArrayInputStream(accessToken.getBytes(UTF_8))) {
-                    credential = GoogleCredential.fromStream(inputStream).createScoped(CredentialFactory.DEFAULT_SCOPES);
+                    credential = GoogleCredential.fromStream(inputStream).createScoped(DEFAULT_SCOPES);
                 }
             }
             else {
                 credential = jsonGoogleCredential.orElseThrow(() -> new IllegalStateException("GCS credentials not configured"));
             }
-            return new Storage.Builder(httpTransport, JacksonFactory.getDefaultInstance(), new RetryHttpInitializer(credential, APPLICATION_NAME))
+            return new Storage.Builder(httpTransport, JacksonFactory.getDefaultInstance(), new RetryHttpInitializer(credential, RetryHttpInitializerOptions.builder()
+                        .setReadTimeout(Duration.ofMillis(gcsOptions.getHttpRequestReadTimeout()))
+                        .setMaxRequestRetries(gcsOptions.getMaxHttpRequestRetries())
+                    .build()))
                     .setApplicationName(APPLICATION_NAME)
                     .build();
         }

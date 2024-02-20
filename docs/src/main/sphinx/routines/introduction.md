@@ -55,8 +55,13 @@ SELECT abs(-10); -- -20, not 10!
 ## Catalog routines
 
 You can store a routine in the context of a catalog, if the connector used in
-the catalog supports routine storage. In this scenario, the following commands
-can be used:
+the catalog supports routine storage. The following connectors support catalog
+routine storage:
+
+* [](/connector/hive)
+* [](/connector/memory)
+
+In this scenario, the following commands can be used:
 
 * [](/sql/create-function) to create and store a routine.
 * [](/sql/drop-function) to remove a routine.
@@ -125,11 +130,11 @@ before the following keywords:
 * `REPEAT`
 * `WHILE`
 
-The label is used to name the block in order to continue processing with the
-`ITERATE` statement or exit the block with the `LEAVE` statement. This flow
-control is supported for nested blocks, allowing to continue or exit an outer
-block, not just the innermost block. For example, the following snippet uses the
-label `top` to name the complete block from `REPEAT` to `END REPEAT`:
+The label is used to name the block to continue processing with the `ITERATE`
+statement or exit the block with the `LEAVE` statement. This flow control is
+supported for nested blocks, allowing to continue or exit an outer block, not
+just the innermost block. For example, the following snippet uses the label
+`top` to name the complete block from `REPEAT` to `END REPEAT`:
 
 ```sql
 top: REPEAT
@@ -153,8 +158,8 @@ terms of memory and processing. Take the following considerations into account
 when writing and running SQL routines:
 
 * Some checks for the runtime behavior of routines are in place. For example,
-  routines that use take longer to process than a hardcoded threshold are automatically
-  terminated.
+  routines that take longer to process than a hardcoded threshold are
+  automatically terminated.
 * Avoid creation of arrays in a looping construct. Each iteration creates a
   separate new array with all items and copies the data for each modification,
   leaving the prior array in memory for automated clean up later. Use a [lambda
@@ -171,7 +176,12 @@ when writing and running SQL routines:
 
 The following limitations apply to SQL routines.
 
-* Routines must be declared before than can be referenced.
+* Routines must be declared before they are referenced.
 * Recursion cannot be declared or processed.
 * Mutual recursion can not be declared or processed.
 * Queries cannot be processed in a routine.
+
+Specifically this means that routines can not use `SELECT` queries to retrieve
+data or any other queries to process data within the routine. Instead queries
+can use routines to process data. Routines only work on data provided as input
+values and only provide output data from the `RETURN` statement.

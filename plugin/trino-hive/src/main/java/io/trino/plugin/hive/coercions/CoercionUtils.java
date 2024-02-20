@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableList;
 import io.trino.plugin.hive.HiveTimestampPrecision;
 import io.trino.plugin.hive.HiveType;
 import io.trino.plugin.hive.coercions.BooleanCoercer.BooleanToVarcharCoercer;
+import io.trino.plugin.hive.coercions.DateCoercer.DateToVarcharCoercer;
 import io.trino.plugin.hive.coercions.DateCoercer.VarcharToDateCoercer;
 import io.trino.plugin.hive.coercions.TimestampCoercer.LongTimestampToDateCoercer;
 import io.trino.plugin.hive.coercions.TimestampCoercer.LongTimestampToVarcharCoercer;
@@ -69,6 +70,7 @@ import static io.trino.plugin.hive.coercions.DecimalCoercers.createDecimalToInte
 import static io.trino.plugin.hive.coercions.DecimalCoercers.createDecimalToRealCoercer;
 import static io.trino.plugin.hive.coercions.DecimalCoercers.createDecimalToVarcharCoercer;
 import static io.trino.plugin.hive.coercions.DecimalCoercers.createDoubleToDecimalCoercer;
+import static io.trino.plugin.hive.coercions.DecimalCoercers.createIntegerNumberToDecimalCoercer;
 import static io.trino.plugin.hive.coercions.DecimalCoercers.createRealToDecimalCoercer;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.block.ColumnarArray.toColumnarArray;
@@ -108,6 +110,9 @@ public final class CoercionUtils
         if (fromType instanceof VarcharType varcharType && toHiveType.equals(HIVE_DOUBLE)) {
             return Optional.of(new VarcharToDoubleCoercer(varcharType, coercionContext.treatNaNAsNull()));
         }
+        if (fromType instanceof VarcharType varcharType && toHiveType.equals(HIVE_FLOAT)) {
+            return Optional.of(new VarcharToFloatCoercer(varcharType, coercionContext.treatNaNAsNull()));
+        }
         if (fromType instanceof VarcharType varcharType && toType instanceof TimestampType timestampType) {
             if (timestampType.isShort()) {
                 return Optional.of(new VarcharToShortTimestampCoercer(varcharType, timestampType));
@@ -126,6 +131,9 @@ public final class CoercionUtils
         if (fromType instanceof BooleanType && toType instanceof VarcharType toVarcharType) {
             return Optional.of(new BooleanToVarcharCoercer(toVarcharType));
         }
+        if (fromType instanceof VarcharType fromVarcharType && toType instanceof CharType toCharType) {
+            return Optional.of(new VarcharToCharCoercer(fromVarcharType, toCharType));
+        }
         if (fromType instanceof CharType fromCharType && toType instanceof CharType toCharType) {
             if (narrowerThan(toCharType, fromCharType)) {
                 return Optional.of(new CharCoercer(fromCharType, toCharType));
@@ -139,6 +147,9 @@ public final class CoercionUtils
             if (toHiveType.equals(HIVE_DOUBLE)) {
                 return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
             }
+            if (toType instanceof DecimalType toDecimalType) {
+                return Optional.of(createIntegerNumberToDecimalCoercer(fromType, toDecimalType));
+            }
         }
         if (fromHiveType.equals(HIVE_SHORT)) {
             if (toHiveType.equals(HIVE_INT) || toHiveType.equals(HIVE_LONG)) {
@@ -146,6 +157,9 @@ public final class CoercionUtils
             }
             if (toHiveType.equals(HIVE_DOUBLE)) {
                 return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
+            }
+            if (toType instanceof DecimalType toDecimalType) {
+                return Optional.of(createIntegerNumberToDecimalCoercer(fromType, toDecimalType));
             }
         }
         if (fromHiveType.equals(HIVE_INT)) {
@@ -155,9 +169,17 @@ public final class CoercionUtils
             if (toHiveType.equals(HIVE_DOUBLE)) {
                 return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
             }
+            if (toType instanceof DecimalType toDecimalType) {
+                return Optional.of(createIntegerNumberToDecimalCoercer(fromType, toDecimalType));
+            }
         }
-        if (fromHiveType.equals(HIVE_LONG) && toHiveType.equals(HIVE_DOUBLE)) {
-            return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
+        if (fromHiveType.equals(HIVE_LONG)) {
+            if (toHiveType.equals(HIVE_DOUBLE)) {
+                return Optional.of(new IntegerNumberToDoubleCoercer<>(fromType));
+            }
+            if (toType instanceof DecimalType toDecimalType) {
+                return Optional.of(createIntegerNumberToDecimalCoercer(fromType, toDecimalType));
+            }
         }
         if (fromHiveType.equals(HIVE_FLOAT) && toHiveType.equals(HIVE_DOUBLE)) {
             return Optional.of(new FloatToDoubleCoercer());
@@ -198,6 +220,9 @@ public final class CoercionUtils
                 return Optional.of(new LongTimestampToDateCoercer(TIMESTAMP_NANOS, toDateType));
             }
             return Optional.empty();
+        }
+        if (fromType instanceof DateType && toType instanceof VarcharType toVarcharType) {
+            return Optional.of(new DateToVarcharCoercer(toVarcharType));
         }
         if (fromType == DOUBLE && toType instanceof VarcharType toVarcharType) {
             return Optional.of(new DoubleToVarcharCoercer(toVarcharType, coercionContext.treatNaNAsNull()));
@@ -421,7 +446,7 @@ public final class CoercionUtils
                 RowBlock rowBlock = (RowBlock) runLengthEncodedBlock.getValue();
                 RowBlock newRowBlock = RowBlock.fromNotNullSuppressedFieldBlocks(
                         1,
-                        rowBlock.isNull(0) ? Optional.of(new boolean[]{true}) : Optional.empty(),
+                        rowBlock.isNull(0) ? Optional.of(new boolean[] {true}) : Optional.empty(),
                         coerceFields(rowBlock.getFieldBlocks()));
                 return RunLengthEncodedBlock.create(newRowBlock, runLengthEncodedBlock.getPositionCount());
             }

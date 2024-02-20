@@ -21,10 +21,12 @@ import io.trino.matching.Captures;
 import io.trino.matching.Pattern;
 import io.trino.spi.type.Type;
 import io.trino.sql.planner.Symbol;
+import io.trino.sql.planner.iterative.Lookup;
 import io.trino.sql.planner.iterative.Rule;
 import io.trino.sql.planner.plan.Assignments;
 import io.trino.sql.planner.plan.CorrelatedJoinNode;
 import io.trino.sql.planner.plan.JoinNode;
+import io.trino.sql.planner.plan.JoinType;
 import io.trino.sql.planner.plan.ProjectNode;
 import io.trino.sql.tree.Cast;
 import io.trino.sql.tree.Expression;
@@ -36,10 +38,11 @@ import java.util.Optional;
 import static com.google.common.base.Preconditions.checkState;
 import static io.trino.matching.Pattern.empty;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
-import static io.trino.sql.planner.plan.CorrelatedJoinNode.Type.FULL;
-import static io.trino.sql.planner.plan.CorrelatedJoinNode.Type.INNER;
-import static io.trino.sql.planner.plan.CorrelatedJoinNode.Type.LEFT;
-import static io.trino.sql.planner.plan.CorrelatedJoinNode.Type.RIGHT;
+import static io.trino.sql.planner.optimizations.QueryCardinalityUtil.extractCardinality;
+import static io.trino.sql.planner.plan.JoinType.FULL;
+import static io.trino.sql.planner.plan.JoinType.INNER;
+import static io.trino.sql.planner.plan.JoinType.LEFT;
+import static io.trino.sql.planner.plan.JoinType.RIGHT;
 import static io.trino.sql.planner.plan.Patterns.CorrelatedJoin.correlation;
 import static io.trino.sql.planner.plan.Patterns.correlatedJoin;
 import static io.trino.sql.tree.BooleanLiteral.TRUE_LITERAL;
@@ -63,8 +66,9 @@ public class TransformUncorrelatedSubqueryToJoin
         if (correlatedJoinNode.getType() == INNER || correlatedJoinNode.getType() == LEFT) {
             return Result.ofPlanNode(rewriteToJoin(
                     correlatedJoinNode,
-                    correlatedJoinNode.getType().toJoinNodeType(),
-                    correlatedJoinNode.getFilter()));
+                    correlatedJoinNode.getType(),
+                    correlatedJoinNode.getFilter(),
+                    context.getLookup()));
         }
 
         checkState(
@@ -72,14 +76,14 @@ public class TransformUncorrelatedSubqueryToJoin
                 "unexpected CorrelatedJoin type: " + correlatedJoinNode.getType());
 
         // handle RIGHT and FULL correlated join ON TRUE
-        JoinNode.Type type;
+        JoinType type;
         if (correlatedJoinNode.getType() == RIGHT) {
-            type = JoinNode.Type.INNER;
+            type = JoinType.INNER;
         }
         else {
-            type = JoinNode.Type.LEFT;
+            type = JoinType.LEFT;
         }
-        JoinNode joinNode = rewriteToJoin(correlatedJoinNode, type, TRUE_LITERAL);
+        JoinNode joinNode = rewriteToJoin(correlatedJoinNode, type, TRUE_LITERAL, context.getLookup());
 
         if (correlatedJoinNode.getFilter().equals(TRUE_LITERAL)) {
             return Result.ofPlanNode(joinNode);
@@ -109,8 +113,12 @@ public class TransformUncorrelatedSubqueryToJoin
         return Result.empty();
     }
 
-    private JoinNode rewriteToJoin(CorrelatedJoinNode parent, JoinNode.Type type, Expression filter)
+    private JoinNode rewriteToJoin(CorrelatedJoinNode parent, JoinType type, Expression filter, Lookup lookup)
     {
+        if (type == JoinType.LEFT && extractCardinality(parent.getSubquery(), lookup).isAtLeastScalar() && filter.equals(TRUE_LITERAL)) {
+            // input rows will always be matched against subquery rows
+            type = JoinType.INNER;
+        }
         return new JoinNode(
                 parent.getId(),
                 type,

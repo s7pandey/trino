@@ -48,6 +48,7 @@ import io.trino.sql.planner.plan.AssignUniqueId;
 import io.trino.sql.planner.plan.Assignments;
 import io.trino.sql.planner.plan.DataOrganizationSpecification;
 import io.trino.sql.planner.plan.FilterNode;
+import io.trino.sql.planner.plan.FrameBoundType;
 import io.trino.sql.planner.plan.GroupIdNode;
 import io.trino.sql.planner.plan.LimitNode;
 import io.trino.sql.planner.plan.MarkDistinctNode;
@@ -63,6 +64,7 @@ import io.trino.sql.planner.plan.TableWriterNode.MergeParadigmAndTypes;
 import io.trino.sql.planner.plan.TableWriterNode.MergeTarget;
 import io.trino.sql.planner.plan.UnionNode;
 import io.trino.sql.planner.plan.ValuesNode;
+import io.trino.sql.planner.plan.WindowFrameType;
 import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.tree.Cast;
 import io.trino.sql.tree.CoalesceExpression;
@@ -97,7 +99,6 @@ import io.trino.sql.tree.NotExpression;
 import io.trino.sql.tree.NullLiteral;
 import io.trino.sql.tree.Offset;
 import io.trino.sql.tree.OrderBy;
-import io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.QuerySpecification;
 import io.trino.sql.tree.Relation;
@@ -156,13 +157,15 @@ import static io.trino.sql.analyzer.ExpressionAnalyzer.isNumericType;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.trino.sql.planner.GroupingOperationRewriter.rewriteGroupingOperation;
 import static io.trino.sql.planner.LogicalPlanner.failFunction;
-import static io.trino.sql.planner.OrderingScheme.sortItemToSortOrder;
+import static io.trino.sql.planner.OrderingTranslator.sortItemToSortOrder;
 import static io.trino.sql.planner.PlanBuilder.newPlanBuilder;
 import static io.trino.sql.planner.ScopeAware.scopeAwareKey;
 import static io.trino.sql.planner.SystemPartitioningHandle.FIXED_HASH_DISTRIBUTION;
 import static io.trino.sql.planner.plan.AggregationNode.groupingSets;
 import static io.trino.sql.planner.plan.AggregationNode.singleAggregation;
 import static io.trino.sql.planner.plan.AggregationNode.singleGroupingSet;
+import static io.trino.sql.planner.plan.FrameBoundType.CURRENT_ROW;
+import static io.trino.sql.planner.plan.RowsPerMatch.WINDOW;
 import static io.trino.sql.planner.plan.WindowNode.Frame.DEFAULT_FRAME;
 import static io.trino.sql.tree.BooleanLiteral.TRUE_LITERAL;
 import static io.trino.sql.tree.ComparisonExpression.Operator.GREATER_THAN_OR_EQUAL;
@@ -218,7 +221,7 @@ class QueryPlanner
         this.typeCoercion = new TypeCoercion(plannerContext.getTypeManager()::getType);
         this.session = session;
         this.outerContext = outerContext;
-        this.subqueryPlanner = new SubqueryPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, plannerContext, typeCoercion, outerContext, session, recursiveSubqueries);
+        this.subqueryPlanner = new SubqueryPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, plannerContext, outerContext, session, recursiveSubqueries);
         this.recursiveSubqueries = recursiveSubqueries;
     }
 
@@ -1317,7 +1320,7 @@ class QueryPlanner
             // ORDER BY x DESC, x ASC, y --> ORDER BY x DESC, y
             if (!orders.containsKey(symbol)) {
                 symbols.add(symbol);
-                orders.put(symbol, OrderingScheme.sortItemToSortOrder(items.get(i)));
+                orders.put(symbol, OrderingTranslator.sortItemToSortOrder(items.get(i)));
             }
         }
 
@@ -1395,7 +1398,7 @@ class QueryPlanner
                 analysis.getGroupingOperations(node),
                 symbolAllocator,
                 idAllocator,
-                (translations, groupingOperation) -> rewriteGroupingOperation(groupingOperation, descriptor, analysis.getColumnReferenceFields(), groupIdSymbol),
+                (translations, groupingOperation) -> rewriteGroupingOperation(groupingOperation, analysis.getType(groupingOperation), descriptor, analysis.getColumnReferenceFields(), groupIdSymbol),
                 (translations, groupingOperation) -> false);
     }
 
@@ -1556,8 +1559,7 @@ class QueryPlanner
                 Expression cast = new Cast(
                         coercions.get(sortKey).toSymbolReference(),
                         toSqlType(expectedType),
-                        false,
-                        typeCoercion.isTypeOnlyCoercion(analysis.getType(sortKey), expectedType));
+                        false);
                 sortKeyCoercedForFrameBoundCalculation = symbolAllocator.newSymbol(cast, expectedType);
                 sortKeyCoercions.put(expectedType, sortKeyCoercedForFrameBoundCalculation);
                 subPlan = subPlan.withNewRoot(new ProjectNode(
@@ -1600,8 +1602,7 @@ class QueryPlanner
                 Expression cast = new Cast(
                         coercions.get(sortKey).toSymbolReference(),
                         toSqlType(expectedType),
-                        false,
-                        typeCoercion.isTypeOnlyCoercion(analysis.getType(sortKey), expectedType));
+                        false);
                 Symbol castSymbol = symbolAllocator.newSymbol(cast, expectedType);
                 sortKeyCoercions.put(expectedType, castSymbol);
                 subPlan = subPlan.withNewRoot(new ProjectNode(
@@ -1671,8 +1672,7 @@ class QueryPlanner
             offsetToBigint = new Cast(
                     offsetSymbol.toSymbolReference(),
                     toSqlType(BIGINT),
-                    false,
-                    typeCoercion.isTypeOnlyCoercion(offsetType, BIGINT));
+                    false);
         }
 
         Symbol coercedOffsetSymbol = symbolAllocator.newSymbol(offsetToBigint, BIGINT);
@@ -1711,22 +1711,22 @@ class QueryPlanner
             Optional<Symbol> frameEndSymbol,
             Optional<Symbol> sortKeyCoercedForFrameEndComparison)
     {
-        WindowFrame.Type frameType = WindowFrame.Type.RANGE;
-        FrameBound.Type frameStartType = FrameBound.Type.UNBOUNDED_PRECEDING;
-        FrameBound.Type frameEndType = FrameBound.Type.CURRENT_ROW;
+        WindowFrameType frameType = WindowFrameType.RANGE;
+        FrameBoundType frameStartType = FrameBoundType.UNBOUNDED_PRECEDING;
+        FrameBoundType frameEndType = CURRENT_ROW;
 
         Optional<Expression> frameStartExpression = Optional.empty();
         Optional<Expression> frameEndExpression = Optional.empty();
 
         if (window.getFrame().isPresent()) {
             WindowFrame frame = window.getFrame().get();
-            frameType = frame.getType();
+            frameType = mapWindowFrameType(frame.getType());
 
-            frameStartType = frame.getStart().getType();
+            frameStartType = mapFrameBoundType(frame.getStart().getType());
             frameStartExpression = frame.getStart().getValue();
 
             if (frame.getEnd().isPresent()) {
-                frameEndType = frame.getEnd().get().getType();
+                frameEndType = mapFrameBoundType(frame.getEnd().get().getType());
                 frameEndExpression = frame.getEnd().get().getValue();
             }
         }
@@ -1785,6 +1785,26 @@ class QueryPlanner
                         0));
     }
 
+    private WindowFrameType mapWindowFrameType(WindowFrame.Type type)
+    {
+        return switch (type) {
+            case RANGE -> WindowFrameType.RANGE;
+            case ROWS -> WindowFrameType.ROWS;
+            case GROUPS -> WindowFrameType.GROUPS;
+        };
+    }
+
+    private FrameBoundType mapFrameBoundType(FrameBound.Type type)
+    {
+        return switch (type) {
+            case UNBOUNDED_PRECEDING -> FrameBoundType.UNBOUNDED_PRECEDING;
+            case PRECEDING -> FrameBoundType.PRECEDING;
+            case CURRENT_ROW -> CURRENT_ROW;
+            case FOLLOWING -> FrameBoundType.FOLLOWING;
+            case UNBOUNDED_FOLLOWING -> FrameBoundType.UNBOUNDED_FOLLOWING;
+        };
+    }
+
     private PlanBuilder planPatternRecognition(
             PlanBuilder subPlan,
             List<FunctionCall> windowFunctions,
@@ -1798,11 +1818,11 @@ class QueryPlanner
         WindowFrame frame = window.getFrame().orElseThrow();
         FrameBound frameEnd = frame.getEnd().orElseThrow();
         WindowNode.Frame baseFrame = new WindowNode.Frame(
-                WindowFrame.Type.ROWS,
-                FrameBound.Type.CURRENT_ROW,
+                WindowFrameType.ROWS,
+                CURRENT_ROW,
                 Optional.empty(),
                 Optional.empty(),
-                frameEnd.getType(),
+                mapFrameBoundType(frameEnd.getType()),
                 frameEndSymbol,
                 Optional.empty(),
                 Optional.empty(),
@@ -1858,7 +1878,7 @@ class QueryPlanner
                         functions.buildOrThrow(),
                         components.getMeasures(),
                         Optional.of(baseFrame),
-                        RowsPerMatch.WINDOW,
+                        WINDOW,
                         components.getSkipToLabel(),
                         components.getSkipToPosition(),
                         components.isInitial(),
@@ -1955,11 +1975,11 @@ class QueryPlanner
         WindowFrame frame = window.getFrame().orElseThrow();
         FrameBound frameEnd = frame.getEnd().orElseThrow();
         WindowNode.Frame baseFrame = new WindowNode.Frame(
-                WindowFrame.Type.ROWS,
-                FrameBound.Type.CURRENT_ROW,
+                WindowFrameType.ROWS,
+                CURRENT_ROW,
                 Optional.empty(),
                 Optional.empty(),
-                frameEnd.getType(),
+                mapFrameBoundType(frameEnd.getType()),
                 frameEndSymbol,
                 Optional.empty(),
                 Optional.empty(),
@@ -1991,7 +2011,7 @@ class QueryPlanner
                         ImmutableMap.of(),
                         components.getMeasures(),
                         Optional.of(baseFrame),
-                        RowsPerMatch.WINDOW,
+                        WINDOW,
                         components.getSkipToLabel(),
                         components.getSkipToPosition(),
                         components.isInitial(),
@@ -2017,14 +2037,12 @@ class QueryPlanner
             // expressions may be repeated, for example, when resolving ordinal references in a GROUP BY clause
             if (!mappings.containsKey(NodeRef.of(expression))) {
                 if (coercion != null) {
-                    Type type = analysis.getType(expression);
                     Symbol symbol = symbolAllocator.newSymbol(expression, coercion);
 
                     assignments.put(symbol, new Cast(
                             subPlan.rewrite(expression),
                             toSqlType(coercion),
-                            false,
-                            typeCoercion.isTypeOnlyCoercion(type, coercion)));
+                            false));
 
                     mappings.put(NodeRef.of(expression), symbol);
                 }
@@ -2053,8 +2071,7 @@ class QueryPlanner
         return new Cast(
                 rewritten,
                 toSqlType(coercion),
-                false,
-                analysis.isTypeOnlyCoercion(original));
+                false);
     }
 
     public static NodeAndMappings coerce(RelationPlan plan, List<Type> types, SymbolAllocator symbolAllocator, PlanNodeIdAllocator idAllocator)

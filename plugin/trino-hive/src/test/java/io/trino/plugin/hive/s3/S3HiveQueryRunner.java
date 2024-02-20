@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.net.HostAndPort;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import io.airlift.log.Logger;
+import io.airlift.log.Logging;
 import io.airlift.units.Duration;
 import io.trino.plugin.hive.HiveQueryRunner;
 import io.trino.plugin.hive.containers.HiveMinioDataLake;
@@ -24,6 +25,7 @@ import io.trino.plugin.hive.metastore.thrift.BridgingHiveMetastore;
 import io.trino.plugin.hive.metastore.thrift.TestingTokenAwareMetastoreClientFactory;
 import io.trino.plugin.hive.metastore.thrift.ThriftMetastoreConfig;
 import io.trino.testing.DistributedQueryRunner;
+import io.trino.testing.QueryRunner;
 import io.trino.tpch.TpchTable;
 
 import java.util.Locale;
@@ -39,9 +41,13 @@ import static java.util.Objects.requireNonNull;
 
 public final class S3HiveQueryRunner
 {
+    static {
+        Logging.initialize();
+    }
+
     private S3HiveQueryRunner() {}
 
-    public static DistributedQueryRunner create(
+    public static QueryRunner create(
             HiveMinioDataLake hiveMinioDataLake,
             Map<String, String> additionalHiveProperties)
             throws Exception
@@ -171,7 +177,7 @@ public final class S3HiveQueryRunner
         HiveMinioDataLake hiveMinioDataLake = new HiveMinioDataLake("tpch");
         hiveMinioDataLake.start();
 
-        DistributedQueryRunner queryRunner = S3HiveQueryRunner.builder(hiveMinioDataLake)
+        QueryRunner queryRunner = S3HiveQueryRunner.builder(hiveMinioDataLake)
                 .setExtraProperties(ImmutableMap.of("http-server.http.port", "8080"))
                 .setHiveProperties(ImmutableMap.of("hive.security", ALLOW_ALL))
                 .setSkipTimezoneSetup(true)

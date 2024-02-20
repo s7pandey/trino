@@ -1,12 +1,26 @@
 # Release notes
 
-(releases-2023)=
+(releases-2024)=
+## 2024
 
+```{toctree}
+:maxdepth: 1
+
+release/release-439
+release/release-438
+release/release-437
+release/release-436
+```
+
+
+(releases-2023)=
 ## 2023
 
 ```{toctree}
 :maxdepth: 1
 
+release/release-435
+release/release-434
 release/release-433
 release/release-432
 release/release-431
@@ -38,7 +52,6 @@ release/release-406
 ```
 
 (releases-2022)=
-
 ## 2022
 
 ```{toctree}
@@ -85,7 +98,6 @@ release/release-368
 ```
 
 (releases-2021)=
-
 ## 2021
 
 ```{toctree}
@@ -111,7 +123,6 @@ release/release-351
 ```
 
 (releases-2020)=
-
 ## 2020
 
 ```{toctree}
@@ -143,7 +154,6 @@ release/release-328
 ```
 
 (releases-2019)=
-
 ## 2019
 
 ```{toctree}

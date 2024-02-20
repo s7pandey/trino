@@ -20,8 +20,11 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import io.airlift.json.JsonCodec;
+import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
-import io.trino.plugin.hive.util.HiveBucketing.BucketingVersion;
+import io.trino.plugin.hive.HiveWritableTableHandle.BucketInfo;
+import io.trino.plugin.hive.acid.AcidTransaction;
+import io.trino.plugin.hive.util.HiveBucketing;
 import io.trino.spi.Page;
 import io.trino.spi.PageIndexer;
 import io.trino.spi.PageIndexerFactory;
@@ -64,6 +67,7 @@ import static java.util.stream.Collectors.toList;
 public class HivePageSink
         implements ConnectorPageSink, ConnectorMergeSink
 {
+    private static final Logger LOG = Logger.get(HivePageSink.class);
     private static final int MAX_PAGE_POSITIONS = 4096;
 
     private final HiveWriterFactory writerFactory;
@@ -85,9 +89,11 @@ public class HivePageSink
     private final List<HiveWriter> writers = new ArrayList<>();
 
     private final long targetMaxFileSize;
+    private final long idleWriterMinFileSize;
     private final List<Closeable> closedWriterRollbackActions = new ArrayList<>();
     private final List<Slice> partitionUpdates = new ArrayList<>();
     private final List<Callable<Object>> verificationTasks = new ArrayList<>();
+    private final List<Boolean> activeWriters = new ArrayList<>();
 
     private final boolean isMergeSink;
     private long writtenBytes;
@@ -95,11 +101,10 @@ public class HivePageSink
     private long validationCpuNanos;
 
     public HivePageSink(
-            HiveWritableTableHandle tableHandle,
             HiveWriterFactory writerFactory,
             List<HiveColumnHandle> inputColumns,
-            boolean isTransactional,
-            Optional<HiveBucketProperty> bucketProperty,
+            AcidTransaction acidTransaction,
+            Optional<BucketInfo> bucketInfo,
             PageIndexerFactory pageIndexerFactory,
             int maxOpenWriters,
             ListeningExecutorService writeVerificationExecutor,
@@ -112,16 +117,16 @@ public class HivePageSink
 
         requireNonNull(pageIndexerFactory, "pageIndexerFactory is null");
 
-        this.isTransactional = isTransactional;
+        this.isTransactional = acidTransaction.isTransactional();
         this.maxOpenWriters = maxOpenWriters;
         this.writeVerificationExecutor = requireNonNull(writeVerificationExecutor, "writeVerificationExecutor is null");
         this.partitionUpdateCodec = requireNonNull(partitionUpdateCodec, "partitionUpdateCodec is null");
 
-        this.isMergeSink = tableHandle.getTransaction().isMerge();
-        requireNonNull(bucketProperty, "bucketProperty is null");
+        this.isMergeSink = acidTransaction.isMerge();
+        requireNonNull(bucketInfo, "bucketInfo is null");
         this.pagePartitioner = new HiveWriterPagePartitioner(
                 inputColumns,
-                bucketProperty.isPresent(),
+                bucketInfo.isPresent(),
                 pageIndexerFactory);
 
         // determine the input index of the partition columns and data columns
@@ -144,13 +149,13 @@ public class HivePageSink
         this.partitionColumnsInputIndex = Ints.toArray(partitionColumns.build());
         this.dataColumnInputIndex = Ints.toArray(dataColumnsInputIndex.build());
 
-        if (bucketProperty.isPresent()) {
-            BucketingVersion bucketingVersion = bucketProperty.get().getBucketingVersion();
-            int bucketCount = bucketProperty.get().getBucketCount();
-            bucketColumns = bucketProperty.get().getBucketedBy().stream()
-                    .mapToInt(dataColumnNameToIdMap::get)
+        if (bucketInfo.isPresent()) {
+            HiveBucketing.BucketingVersion bucketingVersion = bucketInfo.get().bucketingVersion();
+            int bucketCount = bucketInfo.get().bucketCount();
+            bucketColumns = bucketInfo.get().bucketedBy().stream()
+                    .mapToInt(dataColumnNameToIdMap::getInt)
                     .toArray();
-            List<HiveType> bucketColumnTypes = bucketProperty.get().getBucketedBy().stream()
+            List<HiveType> bucketColumnTypes = bucketInfo.get().bucketedBy().stream()
                     .map(dataColumnNameToTypeMap::get)
                     .collect(toList());
             bucketFunction = new HiveBucketFunction(bucketingVersion, bucketCount, bucketColumnTypes);
@@ -161,6 +166,7 @@ public class HivePageSink
         }
 
         this.targetMaxFileSize = HiveSessionProperties.getTargetMaxFileSize(session).toBytes();
+        this.idleWriterMinFileSize = HiveSessionProperties.getIdleWriterMinFileSize(session).toBytes();
     }
 
     @Override
@@ -191,6 +197,9 @@ public class HivePageSink
     {
         ImmutableList.Builder<Slice> resultSlices = ImmutableList.builder();
         for (HiveWriter writer : writers) {
+            if (writer == null) {
+                continue;
+            }
             writer.commit();
             MergeFileWriter mergeFileWriter = (MergeFileWriter) writer.getFileWriter();
             PartitionUpdateAndMergeResults results = mergeFileWriter.getPartitionUpdateAndMergeResults(writer.getPartitionUpdate());
@@ -198,6 +207,7 @@ public class HivePageSink
         }
         List<Slice> result = resultSlices.build();
         writtenBytes = writers.stream()
+                .filter(Objects::nonNull)
                 .mapToLong(HiveWriter::getWrittenBytes)
                 .sum();
         return Futures.immediateFuture(result);
@@ -308,6 +318,7 @@ public class HivePageSink
             }
 
             HiveWriter writer = writers.get(index);
+            verify(writer != null, "Expected writer at index %s", index);
 
             long currentWritten = writer.getWrittenBytes();
             long currentMemory = writer.getMemoryUsage();
@@ -316,12 +327,17 @@ public class HivePageSink
 
             writtenBytes += (writer.getWrittenBytes() - currentWritten);
             memoryUsage += (writer.getMemoryUsage() - currentMemory);
+            // Mark this writer as active (i.e. not idle)
+            activeWriters.set(index, true);
         }
     }
 
     private void closeWriter(int writerIndex)
     {
         HiveWriter writer = writers.get(writerIndex);
+        if (writer == null) {
+            return;
+        }
 
         long currentWritten = writer.getWrittenBytes();
         long currentMemory = writer.getMemoryUsage();
@@ -338,6 +354,26 @@ public class HivePageSink
         partitionUpdates.add(wrappedBuffer(partitionUpdateCodec.toJsonBytes(partitionUpdate)));
     }
 
+    @Override
+    public void closeIdleWriters()
+    {
+        // For transactional tables we don't want to split output files because there is an explicit or implicit bucketing
+        // and file names have no random component (e.g. bucket_00000)
+        if (bucketFunction != null || isTransactional) {
+            return;
+        }
+
+        for (int writerIndex = 0; writerIndex < writers.size(); writerIndex++) {
+            HiveWriter writer = writers.get(writerIndex);
+            if (activeWriters.get(writerIndex) || writer == null || writer.getWrittenBytes() <= idleWriterMinFileSize) {
+                activeWriters.set(writerIndex, false);
+                continue;
+            }
+            LOG.debug("Closing writer %s with %s bytes written", writerIndex, writer.getWrittenBytes());
+            closeWriter(writerIndex);
+        }
+    }
+
     private int[] getWriterIndexes(Page page)
     {
         Page partitionColumns = extractColumns(page, partitionColumnsInputIndex);
@@ -350,6 +386,7 @@ public class HivePageSink
         // expand writers list to new size
         while (writers.size() <= pagePartitioner.getMaxIndex()) {
             writers.add(null);
+            activeWriters.add(false);
         }
 
         // create missing writers
@@ -378,7 +415,6 @@ public class HivePageSink
             memoryUsage += writer.getMemoryUsage();
         }
         verify(writers.size() == pagePartitioner.getMaxIndex() + 1);
-        verify(!writers.contains(null));
 
         return writerIndexes;
     }

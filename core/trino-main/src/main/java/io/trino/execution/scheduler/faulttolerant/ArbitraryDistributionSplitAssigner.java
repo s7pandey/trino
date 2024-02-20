@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
@@ -132,7 +133,7 @@ class ArbitraryDistributionSplitAssigner
                     partitionAssignment.getPartitionId(),
                     planNodeId,
                     false,
-                    singleSourcePartition(SINGLE_SOURCE_PARTITION_ID, splits),
+                    singleSourcePartition(splits),
                     noMoreSplits));
         }
         if (noMoreSplits) {
@@ -158,7 +159,7 @@ class ArbitraryDistributionSplitAssigner
                             0,
                             replicatedSourceId,
                             false,
-                            singleSourcePartition(SINGLE_SOURCE_PARTITION_ID, replicatedSplits.get(replicatedSourceId)),
+                            singleSourcePartition(replicatedSplits.get(replicatedSourceId)),
                             true));
                 }
                 for (PlanNodeId partitionedSourceId : partitionedSources) {
@@ -180,7 +181,7 @@ class ArbitraryDistributionSplitAssigner
                                     partitionAssignment.getPartitionId(),
                                     partitionedSourceNodeId,
                                     false,
-                                    singleSourcePartition(0, ImmutableList.of()),
+                                    singleSourcePartition(ImmutableList.of()),
                                     true));
                         }
                         // seal partition
@@ -195,7 +196,7 @@ class ArbitraryDistributionSplitAssigner
         return assignment.build();
     }
 
-    private ListMultimap<Integer, Split> singleSourcePartition(int sourcePartitionId, List<Split> splits)
+    private ListMultimap<Integer, Split> singleSourcePartition(List<Split> splits)
     {
         ImmutableListMultimap.Builder<Integer, Split> builder = ImmutableListMultimap.builder();
         builder.putAll(0, splits);
@@ -249,7 +250,7 @@ class ArbitraryDistributionSplitAssigner
                             partitionAssignment.getPartitionId(),
                             replicatedSourceId,
                             false,
-                            singleSourcePartition(SINGLE_SOURCE_PARTITION_ID, replicatedSplits.get(replicatedSourceId)),
+                            singleSourcePartition(replicatedSplits.get(replicatedSourceId)),
                             completedSources.contains(replicatedSourceId)));
                 }
             }
@@ -257,7 +258,7 @@ class ArbitraryDistributionSplitAssigner
                     partitionAssignment.getPartitionId(),
                     planNodeId,
                     true,
-                    singleSourcePartition(SINGLE_SOURCE_PARTITION_ID, ImmutableList.of(split)),
+                    singleSourcePartition(ImmutableList.of(split)),
                     false));
             partitionAssignment.assignSplit(splitSizeInBytes);
         }
@@ -276,7 +277,7 @@ class ArbitraryDistributionSplitAssigner
                             0,
                             replicatedSourceId,
                             false,
-                            singleSourcePartition(SINGLE_SOURCE_PARTITION_ID, replicatedSplits.get(replicatedSourceId)),
+                            singleSourcePartition(replicatedSplits.get(replicatedSourceId)),
                             true));
                 }
                 for (PlanNodeId partitionedSourceId : partitionedSources) {
@@ -312,6 +313,32 @@ class ArbitraryDistributionSplitAssigner
         }
 
         return assignment.build();
+    }
+
+    @Override
+    public String toString()
+    {
+        return toStringHelper(this)
+                .add("catalogRequirement", catalogRequirement)
+                .add("partitionedSources", partitionedSources)
+                .add("replicatedSources", replicatedSources)
+                .add("allSources", allSources)
+                .add("adaptiveGrowthPeriod", adaptiveGrowthPeriod)
+                .add("adaptiveGrowthFactor", adaptiveGrowthFactor)
+                .add("minTargetPartitionSizeInBytes", minTargetPartitionSizeInBytes)
+                .add("maxTargetPartitionSizeInBytes", maxTargetPartitionSizeInBytes)
+                .add("standardSplitSizeInBytes", standardSplitSizeInBytes)
+                .add("maxTaskSplitCount", maxTaskSplitCount)
+                .add("nextPartitionId", nextPartitionId)
+                .add("adaptiveCounter", adaptiveCounter)
+                .add("targetPartitionSizeInBytes", targetPartitionSizeInBytes)
+                .add("roundedTargetPartitionSizeInBytes", roundedTargetPartitionSizeInBytes)
+                .add("allAssignments", allAssignments)
+                .add("openAssignments", openAssignments)
+                .add("completedSources", completedSources)
+                .add("replicatedSplits.size()", replicatedSplits.size())
+                .add("noMoreReplicatedSplits", noMoreReplicatedSplits)
+                .toString();
     }
 
     private Optional<HostAddress> getHostRequirement(Split split)
@@ -395,6 +422,17 @@ class ArbitraryDistributionSplitAssigner
         public void setFull(boolean full)
         {
             this.full = full;
+        }
+
+        @Override
+        public String toString()
+        {
+            return toStringHelper(this)
+                    .add("partitionId", partitionId)
+                    .add("assignedDataSizeInBytes", assignedDataSizeInBytes)
+                    .add("assignedSplitCount", assignedSplitCount)
+                    .add("full", full)
+                    .toString();
         }
     }
 }

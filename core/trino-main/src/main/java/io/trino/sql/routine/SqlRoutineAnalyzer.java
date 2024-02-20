@@ -192,7 +192,7 @@ public class SqlRoutineAnalyzer
             return plannerContext.getTypeManager().getType(toTypeSignature(type));
         }
         catch (TypeNotFoundException e) {
-            throw semanticException(TYPE_MISMATCH, node, "Unknown type: " + type);
+            throw semanticException(TYPE_MISMATCH, node, "Unknown type: %s", type);
         }
     }
 
@@ -218,7 +218,7 @@ public class SqlRoutineAnalyzer
             }
             String name = identifierValue(parameter.getName().get());
             if (!argumentNames.add(name)) {
-                throw semanticException(INVALID_ARGUMENTS, parameter, "Duplicate function parameter name: " + name);
+                throw semanticException(INVALID_ARGUMENTS, parameter, "Duplicate function parameter name: %s", name);
             }
         }
     }
@@ -423,7 +423,7 @@ public class SqlRoutineAnalyzer
                         throw semanticException(TYPE_MISMATCH, whenClause.getExpression(), "WHEN clause value must evaluate to CASE value type %s (actual: %s)", valueType, whenType);
                     }
                     if (!whenType.equals(superType.get())) {
-                        addCoercion(whenClause.getExpression(), whenType, superType.get());
+                        addCoercion(whenClause.getExpression(), superType.get());
                     }
                 }
             }
@@ -514,10 +514,10 @@ public class SqlRoutineAnalyzer
                 return;
             }
             if (!typeCoercion.canCoerce(actualType, expectedType)) {
-                throw semanticException(TYPE_MISMATCH, expression, message + " must evaluate to %s (actual: %s)", expectedType, actualType);
+                throw semanticException(TYPE_MISMATCH, expression, "%s must evaluate to %s (actual: %s)", message, expectedType, actualType);
             }
 
-            addCoercion(expression, actualType, expectedType);
+            addCoercion(expression, expectedType);
         }
 
         private Type analyzeExpression(Context context, Expression expression)
@@ -545,9 +545,9 @@ public class SqlRoutineAnalyzer
             return analysis.getType(expression);
         }
 
-        private void addCoercion(Expression expression, Type actualType, Type expectedType)
+        private void addCoercion(Expression expression, Type expectedType)
         {
-            analysis.addCoercion(expression, expectedType, typeCoercion.isTypeOnlyCoercion(actualType, expectedType));
+            analysis.addCoercion(expression, expectedType);
         }
 
         private void analyzeNodes(Context context, List<? extends Node> statements)

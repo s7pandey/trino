@@ -72,14 +72,27 @@ any specific schema or table permissions. The table and schema rules are used to
 specify who can create, drop, alter, select, insert, delete, etc. for schemas
 and tables.
 
+For each rule set, permission is based on the first matching rule, read from the
+top to the bottom of the configuration file. If no rule matches, access is
+denied.
+
+If no rules are provided at all, then access is granted. You can remove
+access grant by adding a section with an empty set of rules at that particular
+level, for example:
+
+```json
+{
+  "schemas": []
+}
+```
+
+At the catalog level you have to add a single "dummy" rule for each accessible
+catalog.
+
 :::{note}
 These rules do not apply to system-defined tables in the
 `information_schema` schema.
 :::
-
-For each rule set, permission is based on the first matching rule read from top
-to bottom.  If no rule matches, access is denied. If no rules are provided at
-all, then access is granted.
 
 The following table summarizes the permissions required for each SQL command:
 
@@ -639,11 +652,17 @@ as `group@example.net`, you can use the following rules.
 These rules specify which users can access the system information management
 interface. System information access includes the following aspects:
 
-- Read access to details such as Trino version, uptime of the node, and others
-  from the `/v1/info` and `/v1/status` REST endpoints.
+- Read access to sensitive information from REST endpoints, such as `/v1/node`
+  and `/v1/thread`.
 - Read access with the {doc}`system information functions </functions/system>`.
 - Read access with the {doc}`/connector/system`.
 - Write access to trigger {doc}`/admin/graceful-shutdown`.
+
+The following REST endpoints are always public and not affected by these rules:
+
+- `GET /v1/info`
+- `GET /v1/info/state`
+- `GET /v1/status`
 
 The user is granted or denied access based on the first matching
 rule read from top to bottom. If no rules are specified, all access to system
